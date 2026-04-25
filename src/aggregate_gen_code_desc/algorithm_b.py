@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +10,7 @@ from aggregate_gen_code_desc.metrics import GenerationLine
 from aggregate_gen_code_desc.protocol import expand_entry_lines, load_gen_code_desc_dir, parse_utc_datetime
 
 
-HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
 @dataclass(frozen=True)
@@ -30,13 +30,18 @@ def collect_algorithm_b_lines(
     end_time: str,
     scope: str,
 ) -> AlgorithmBResult:
+    if not commit_patch_dir.is_dir():
+        raise ValueError(f"commit patch dir not found: {commit_patch_dir}")
+
     loaded = load_gen_code_desc_dir(gen_code_desc_dir, repo_url, repo_branch)
     if loaded.protocol_version != "26.03":
         raise ValueError("Algorithm B requires protocolVersion 26.03 input")
 
     start_dt = parse_utc_datetime(start_time)
     end_dt = parse_utc_datetime(end_time)
-    lines: list[GenerationLine] = []
+    snapshot: dict[str, list[LineOrigin]] = {}
+    attribution_indexes: dict[str, dict[tuple[str, str, int], tuple[int, str]]] = {}
+    revision_timestamps: dict[str, str] = {}
 
     for record in _sort_records_for_replay(loaded.records):
         repository = record["REPOSITORY"]
@@ -48,23 +53,23 @@ def collect_algorithm_b_lines(
             continue
 
         revision_id = repository["revisionId"]
-        attribution_index = _build_v2603_attribution_index(record, scope)
-        for added_line in _parse_added_lines(commit_patch_dir / f"{revision_id}.patch", scope):
-            if not start_dt <= revision_dt <= end_dt:
-                continue
-            gen_ratio, gen_method = attribution_index.get(
-                (added_line.file_name, added_line.line_kind, added_line.line_number),
-                (0, "Manual"),
-            )
-            lines.append(
-                GenerationLine(
-                    gen_ratio=gen_ratio,
-                    gen_method=gen_method,
-                    file_name=added_line.file_name,
-                    line_number=added_line.line_number,
-                    line_kind=added_line.line_kind,
-                )
-            )
+        attribution_indexes[revision_id] = _build_v2603_attribution_index(record, scope)
+        revision_timestamps[revision_id] = revision_timestamp
+        snapshot = _replay_patch(
+            snapshot=snapshot,
+            patch_path=commit_patch_dir / f"{revision_id}.patch",
+            revision_id=revision_id,
+            revision_timestamp=revision_timestamp,
+        )
+
+    lines = _collect_surviving_lines(
+        snapshot=snapshot,
+        attribution_indexes=attribution_indexes,
+        revision_timestamps=revision_timestamps,
+        start_time=start_time,
+        end_time=end_time,
+        scope=scope,
+    )
 
     vcs_type = loaded.records[-1].get("REPOSITORY", {}).get("vcsType", "git")
     return AlgorithmBResult(
@@ -76,14 +81,35 @@ def collect_algorithm_b_lines(
 
 
 @dataclass(frozen=True)
-class AddedPatchLine:
-    file_name: str
-    line_number: int
-    line_kind: str
+class LineOrigin:
+    origin_revision_id: str | None
+    origin_timestamp: str | None
+    origin_file_name: str
+    origin_line_number: int
+
+
+@dataclass
+class PatchHunk:
+    old_start: int
+    new_start: int
+    lines: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FilePatch:
+    old_path: str | None = None
+    new_path: str | None = None
+    hunks: list[PatchHunk] = field(default_factory=list)
 
 
 def _sort_records_for_replay(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(records, key=lambda record: parse_utc_datetime(record["REPOSITORY"]["revisionTimestamp"]))
+    return sorted(
+        records,
+        key=lambda record: (
+            parse_utc_datetime(record["REPOSITORY"]["revisionTimestamp"]),
+            str(record["REPOSITORY"]["revisionId"]),
+        ),
+    )
 
 
 def _build_v2603_attribution_index(record: dict[str, Any], scope: str) -> dict[tuple[str, str, int], tuple[int, str]]:
@@ -97,38 +123,182 @@ def _build_v2603_attribution_index(record: dict[str, Any], scope: str) -> dict[t
     return index
 
 
-def _parse_added_lines(patch_path: Path, scope: str) -> list[AddedPatchLine]:
+def _replay_patch(
+    snapshot: dict[str, list[LineOrigin]],
+    patch_path: Path,
+    revision_id: str,
+    revision_timestamp: str,
+) -> dict[str, list[LineOrigin]]:
     if not patch_path.exists():
         raise ValueError(f"missing patch file: {patch_path}")
 
-    added_lines: list[AddedPatchLine] = []
-    current_file: str | None = None
-    current_line_number: int | None = None
+    next_snapshot = {file_name: list(lines) for file_name, lines in snapshot.items()}
+    for file_patch in _parse_file_patches(patch_path):
+        source_file = file_patch.old_path
+        target_file = file_patch.new_path
+        if source_file is None and target_file is None:
+            continue
+
+        old_file = source_file or target_file
+        new_file = target_file or source_file
+        old_lines = list(next_snapshot.get(old_file or "", []))
+        replayed_lines = _apply_hunks(
+            old_lines=old_lines,
+            hunks=file_patch.hunks,
+            target_file=new_file or "",
+            revision_id=revision_id,
+            revision_timestamp=revision_timestamp,
+        )
+
+        if target_file is None:
+            if source_file is not None:
+                next_snapshot.pop(source_file, None)
+            continue
+
+        if source_file is not None and source_file != target_file:
+            next_snapshot.pop(source_file, None)
+        next_snapshot[target_file] = replayed_lines
+
+    return next_snapshot
+
+
+def _parse_file_patches(patch_path: Path) -> list[FilePatch]:
+    file_patches: list[FilePatch] = []
+    current_file_patch: FilePatch | None = None
+    current_hunk: PatchHunk | None = None
 
     for raw_line in patch_path.read_text(encoding="utf-8").splitlines():
+        if raw_line.startswith("diff --git "):
+            if current_file_patch is not None:
+                file_patches.append(current_file_patch)
+            current_file_patch = FilePatch()
+            current_hunk = None
+            continue
+
+        if current_file_patch is None:
+            continue
+
+        if raw_line.startswith("--- "):
+            current_file_patch.old_path = _normalize_patch_path(raw_line.removeprefix("--- "))
+            continue
         if raw_line.startswith("+++ "):
-            current_file = _normalize_patch_path(raw_line.removeprefix("+++ "))
+            current_file_patch.new_path = _normalize_patch_path(raw_line.removeprefix("+++ "))
             continue
 
         hunk_match = HUNK_HEADER.match(raw_line)
         if hunk_match:
-            current_line_number = int(hunk_match.group(1))
+            current_hunk = PatchHunk(old_start=int(hunk_match.group(1)), new_start=int(hunk_match.group(3)))
+            current_file_patch.hunks.append(current_hunk)
             continue
 
-        if current_file is None or current_line_number is None:
+        if current_hunk is None:
             continue
-        if raw_line.startswith("+") and not raw_line.startswith("+++"):
-            line_kind = _line_kind_for_scope(current_file, scope)
-            if line_kind is not None and raw_line[1:].strip():
-                added_lines.append(AddedPatchLine(current_file, current_line_number, line_kind))
-            current_line_number += 1
-            continue
-        if raw_line.startswith("-") and not raw_line.startswith("---"):
-            continue
-        if raw_line.startswith(" "):
-            current_line_number += 1
+        if raw_line.startswith((" ", "+", "-")) and not raw_line.startswith(("+++", "---")):
+            current_hunk.lines.append(raw_line)
 
-    return added_lines
+    if current_file_patch is not None:
+        file_patches.append(current_file_patch)
+
+    return file_patches
+
+
+def _apply_hunks(
+    old_lines: list[LineOrigin],
+    hunks: list[PatchHunk],
+    target_file: str,
+    revision_id: str,
+    revision_timestamp: str,
+) -> list[LineOrigin]:
+    if not hunks:
+        return old_lines
+
+    replayed_lines: list[LineOrigin] = []
+    old_cursor = 1
+
+    for hunk in hunks:
+        while old_cursor < hunk.old_start:
+            replayed_lines.append(_existing_or_legacy_origin(old_lines, old_cursor, target_file))
+            old_cursor += 1
+
+        new_cursor = hunk.new_start
+        for raw_line in hunk.lines:
+            marker = raw_line[:1]
+            if marker == " ":
+                replayed_lines.append(_existing_or_legacy_origin(old_lines, old_cursor, target_file))
+                old_cursor += 1
+                new_cursor += 1
+            elif marker == "-":
+                old_cursor += 1
+            elif marker == "+":
+                replayed_lines.append(
+                    LineOrigin(
+                        origin_revision_id=revision_id,
+                        origin_timestamp=revision_timestamp,
+                        origin_file_name=target_file,
+                        origin_line_number=new_cursor,
+                    )
+                )
+                new_cursor += 1
+
+    while old_cursor <= len(old_lines):
+        replayed_lines.append(old_lines[old_cursor - 1])
+        old_cursor += 1
+
+    return replayed_lines
+
+
+def _existing_or_legacy_origin(old_lines: list[LineOrigin], old_cursor: int, target_file: str) -> LineOrigin:
+    if old_cursor <= len(old_lines):
+        return old_lines[old_cursor - 1]
+    return LineOrigin(
+        origin_revision_id=None,
+        origin_timestamp=None,
+        origin_file_name=target_file,
+        origin_line_number=old_cursor,
+    )
+
+
+def _collect_surviving_lines(
+    snapshot: dict[str, list[LineOrigin]],
+    attribution_indexes: dict[str, dict[tuple[str, str, int], tuple[int, str]]],
+    revision_timestamps: dict[str, str],
+    start_time: str,
+    end_time: str,
+    scope: str,
+) -> list[GenerationLine]:
+    start_dt = parse_utc_datetime(start_time)
+    end_dt = parse_utc_datetime(end_time)
+    lines: list[GenerationLine] = []
+
+    for file_name in sorted(snapshot):
+        line_kind = _line_kind_for_scope(file_name, scope)
+        if line_kind is None:
+            continue
+
+        for line_number, origin in enumerate(snapshot[file_name], start=1):
+            if origin.origin_revision_id is None or origin.origin_timestamp is None:
+                continue
+            origin_timestamp = revision_timestamps.get(origin.origin_revision_id, origin.origin_timestamp)
+            origin_dt = parse_utc_datetime(origin_timestamp)
+            if not start_dt <= origin_dt <= end_dt:
+                continue
+
+            attribution_index = attribution_indexes.get(origin.origin_revision_id, {})
+            gen_ratio, gen_method = attribution_index.get(
+                (origin.origin_file_name, line_kind, origin.origin_line_number),
+                (0, "Manual"),
+            )
+            lines.append(
+                GenerationLine(
+                    gen_ratio=gen_ratio,
+                    gen_method=gen_method,
+                    file_name=file_name,
+                    line_number=line_number,
+                    line_kind=line_kind,
+                )
+            )
+
+    return lines
 
 
 def _normalize_patch_path(path: str) -> str | None:

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This test verifies the `aggregateGenCodeDesc` CLI contract for US-001 using Algorithm A over v26.03 sparse metadata plus live Git blame, Algorithm B over v26.03 sparse metadata plus offline patch replay, and Algorithm C over v26.04 embedded-blame input. It checks that a real CLI invocation writes a v26.03-shaped aggregate JSON result with the expected metrics.
+This test verifies the `aggregateGenCodeDesc` CLI contract for US-001 using Algorithm A over v26.03 sparse metadata plus live Git blame, Algorithm B over v26.03 sparse metadata plus offline patch replay, and Algorithm C over v26.04 embedded-blame input. It checks that a real CLI invocation writes a v26.03-shaped aggregate JSON result with the expected metrics and reports clear Algorithm B patch-directory errors.
 
 ## Status
 
@@ -20,6 +20,7 @@ Implemented / Passing
 - System behavior: top-level `aggregateGenCodeDesc.py` writes `genCodeDescV26.03.json`.
 - Algorithm coverage: A, B, and C.
 - Protocol coverage: v26.03 and v26.04.
+- Algorithm B replay coverage: add-only patches, multi-patch delete/modify/add replay, final snapshot denominator, and missing patch directory diagnostics.
 
 ## Manual
 

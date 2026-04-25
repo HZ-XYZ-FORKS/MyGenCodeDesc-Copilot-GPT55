@@ -132,7 +132,7 @@ def _v2604_outside_window_record():
     }
 
 
-def _v2603_record(repo_url, revision_id, revision_timestamp=None):
+def _v2603_record_with_detail(repo_url, revision_id, revision_timestamp, code_lines, total_code_lines):
     repository = {
         "vcsType": "git",
         "repoURL": repo_url,
@@ -147,9 +147,9 @@ def _v2603_record(repo_url, revision_id, revision_timestamp=None):
         "protocolVersion": "26.03",
         "codeAgent": "SysTestingFixture",
         "SUMMARY": {
-            "totalCodeLines": 10,
-            "fullGeneratedCodeLines": 5,
-            "partialGeneratedCodeLines": 4,
+            "totalCodeLines": total_code_lines,
+            "fullGeneratedCodeLines": 0,
+            "partialGeneratedCodeLines": 0,
             "totalDocLines": 0,
             "fullGeneratedDocLines": 0,
             "partialGeneratedDocLines": 0,
@@ -157,26 +157,54 @@ def _v2603_record(repo_url, revision_id, revision_timestamp=None):
         "DETAIL": [
             {
                 "fileName": "src/auth.py",
-                "codeLines": [
-                    {"lineRange": {"from": 1, "to": 5}, "genRatio": 100, "genMethod": "codeCompletion"},
-                    {"lineRange": {"from": 6, "to": 8}, "genRatio": 80, "genMethod": "vibeCoding"},
-                    {"lineLocation": 9, "genRatio": 30, "genMethod": "vibeCoding"},
-                ],
+                "codeLines": code_lines,
             }
         ],
         "REPOSITORY": repository,
     }
 
 
-def _write_add_only_patch(path):
+def _v2603_record(repo_url, revision_id, revision_timestamp=None):
+    return _v2603_record_with_detail(
+        repo_url,
+        revision_id,
+        revision_timestamp,
+        [
+            {"lineRange": {"from": 1, "to": 5}, "genRatio": 100, "genMethod": "codeCompletion"},
+            {"lineRange": {"from": 6, "to": 8}, "genRatio": 80, "genMethod": "vibeCoding"},
+            {"lineLocation": 9, "genRatio": 30, "genMethod": "vibeCoding"},
+        ],
+        10,
+    )
+
+
+def _write_add_only_patch(path, total_lines=10):
     patch_lines = [
         "diff --git a/src/auth.py b/src/auth.py",
         "new file mode 100644",
         "index 0000000..1111111",
         "--- /dev/null",
         "+++ b/src/auth.py",
-        "@@ -0,0 +1,10 @@",
-        *[f"+value_{line_number} = {line_number}" for line_number in range(1, 11)],
+        f"@@ -0,0 +1,{total_lines} @@",
+        *[f"+value_{line_number} = {line_number}" for line_number in range(1, total_lines + 1)],
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
+def _write_modify_delete_patch(path):
+    patch_lines = [
+        "diff --git a/src/auth.py b/src/auth.py",
+        "index 1111111..2222222 100644",
+        "--- a/src/auth.py",
+        "+++ b/src/auth.py",
+        "@@ -1,5 +1,5 @@",
+        " value_1 = 1",
+        "-value_2 = 2",
+        "+value_2 = 20",
+        " value_3 = 3",
+        "-value_4 = 4",
+        " value_5 = 5",
+        "+value_6 = 6",
     ]
     path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
 
@@ -434,3 +462,143 @@ def test_aggregate_gen_code_desc_py_supports_v2603_with_algorithm_b_patch_replay
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.77
     assert aggregate["AGGREGATE"]["metrics"]["fullyAI"]["value"] == 0.5
     assert aggregate["AGGREGATE"]["metrics"]["mostlyAI"]["value"] == 0.8
+
+
+# US-001 / Algorithm B / TC-SYS-005
+def test_aggregate_gen_code_desc_py_algorithm_b_replays_multiple_patches_to_final_snapshot(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 80, "genMethod": "vibeCoding"},
+                {"lineLocation": 4, "genRatio": 100, "genMethod": "codeCompletion"},
+            ],
+            5,
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "rev2.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            "rev2",
+            "2026-01-11T00:00:00Z",
+            [
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+                {"lineLocation": 5, "genRatio": 100, "genMethod": "codeCompletion"},
+            ],
+            5,
+        ),
+    )
+    _write_add_only_patch(commit_patch_dir / "rev1.patch", total_lines=5)
+    _write_modify_delete_patch(commit_patch_dir / "rev2.patch")
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--threshold",
+            "60",
+            "--commitPatchDir",
+            str(commit_patch_dir),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 5
+    assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 2
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.52
+    assert aggregate["AGGREGATE"]["metrics"]["fullyAI"]["value"] == 0.4
+    assert aggregate["AGGREGATE"]["metrics"]["mostlyAI"]["value"] == 0.6
+    assert aggregate["DETAIL"] == [
+        {
+            "fileName": "src/auth.py",
+            "codeLines": [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+                {"lineLocation": 5, "genRatio": 100, "genMethod": "codeCompletion"},
+            ],
+        }
+    ]
+
+
+# US-001 / Algorithm B diagnostics / TC-SYS-006
+def test_aggregate_gen_code_desc_py_algorithm_b_reports_missing_patch_dir(tmp_path):
+    revision_id = "rev1"
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / f"{revision_id}.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            revision_id,
+            "2026-01-10T00:00:00Z",
+            [{"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"}],
+            1,
+        ),
+    )
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--commitPatchDir",
+            str(tmp_path / "missing-patches"),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 2
+    assert "commit patch dir not found" in completed.stderr
