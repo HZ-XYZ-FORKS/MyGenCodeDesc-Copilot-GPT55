@@ -132,15 +132,26 @@ def _v2604_outside_window_record():
     }
 
 
-def _v2603_record_with_detail(repo_url, revision_id, revision_timestamp, code_lines, total_code_lines):
+def _v2603_record_with_detail(
+    repo_url,
+    revision_id,
+    revision_timestamp,
+    code_lines,
+    total_code_lines,
+    parent_revision_ids=None,
+    vcs_type="git",
+    repo_branch="main",
+):
     repository = {
-        "vcsType": "git",
+        "vcsType": vcs_type,
         "repoURL": repo_url,
-        "repoBranch": "main",
+        "repoBranch": repo_branch,
         "revisionId": revision_id,
     }
     if revision_timestamp is not None:
         repository["revisionTimestamp"] = revision_timestamp
+    if parent_revision_ids is not None:
+        repository["parentRevisionIds"] = parent_revision_ids
 
     return {
         "protocolName": "generatedTextDesc",
@@ -205,6 +216,19 @@ def _write_modify_delete_patch(path):
         "-value_4 = 4",
         " value_5 = 5",
         "+value_6 = 6",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
+def _write_single_line_modify_patch(path):
+    patch_lines = [
+        "diff --git a/src/auth.py b/src/auth.py",
+        "index 1111111..2222222 100644",
+        "--- a/src/auth.py",
+        "+++ b/src/auth.py",
+        "@@ -1,1 +1,1 @@",
+        "-value_1 = 1",
+        "+value_1 = 20",
     ]
     path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
 
@@ -464,7 +488,7 @@ def test_aggregate_gen_code_desc_py_supports_v2603_with_algorithm_b_patch_replay
     assert aggregate["AGGREGATE"]["metrics"]["mostlyAI"]["value"] == 0.8
 
 
-# US-001 / Algorithm B / TC-SYS-005
+# US-001, US-009 / Algorithm B / TC-SYS-005
 def test_aggregate_gen_code_desc_py_algorithm_b_replays_multiple_patches_to_final_snapshot(tmp_path):
     gen_code_desc_dir = tmp_path / "genCodeDesc"
     commit_patch_dir = tmp_path / "patches"
@@ -551,9 +575,21 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_multiple_patches_to_fina
             ],
         }
     ]
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert patch_text.startswith(
+        "# repoURL: https://example.test/repo\n"
+        "# repoBranch: main\n"
+        "# startTime: 2026-01-01T00:00:00Z\n"
+        "# endTime: 2026-01-31T00:00:00Z\n"
+        "# algorithm: B\n"
+        "# scope: A\n"
+    )
+    assert patch_text.index("# --- commit rev1 ---") < patch_text.index("# --- commit rev2 ---")
+    assert "-value_2 = 2" in patch_text
+    assert "+value_2 = 20" in patch_text
 
 
-# US-001 / Algorithm B diagnostics / TC-SYS-006
+# US-001, US-009 / Algorithm B diagnostics / TC-SYS-006
 def test_aggregate_gen_code_desc_py_algorithm_b_reports_missing_patch_dir(tmp_path):
     revision_id = "rev1"
     gen_code_desc_dir = tmp_path / "genCodeDesc"
@@ -602,3 +638,151 @@ def test_aggregate_gen_code_desc_py_algorithm_b_reports_missing_patch_dir(tmp_pa
 
     assert completed.returncode == 2
     assert "commit patch dir not found" in completed.stderr
+
+
+# US-001, US-009 / Algorithm B Git ordering / TC-SYS-007
+def test_aggregate_gen_code_desc_py_algorithm_b_uses_parent_order_over_timestamp_order(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "child.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            "child",
+            "2026-01-10T00:00:00Z",
+            [{"lineLocation": 1, "genRatio": 40, "genMethod": "vibeCoding"}],
+            1,
+            parent_revision_ids=["parent"],
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "parent.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            "parent",
+            "2026-01-11T00:00:00Z",
+            [{"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"}],
+            1,
+        ),
+    )
+    _write_add_only_patch(commit_patch_dir / "parent.patch", total_lines=1)
+    _write_single_line_modify_patch(commit_patch_dir / "child.patch")
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--threshold",
+            "60",
+            "--commitPatchDir",
+            str(commit_patch_dir),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 1
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.4
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert patch_text.index("# --- commit parent ---") < patch_text.index("# --- commit child ---")
+
+
+# US-001, US-007, US-009 / Algorithm B SVN ordering / TC-SYS-008
+def test_aggregate_gen_code_desc_py_algorithm_b_uses_svn_revision_order_over_timestamp_order(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "10.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            "10",
+            "2026-01-10T00:00:00Z",
+            [{"lineLocation": 1, "genRatio": 40, "genMethod": "vibeCoding"}],
+            1,
+            vcs_type="svn",
+            repo_branch="trunk",
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "2.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            "2",
+            "2026-01-11T00:00:00Z",
+            [{"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"}],
+            1,
+            vcs_type="svn",
+            repo_branch="trunk",
+        ),
+    )
+    _write_add_only_patch(commit_patch_dir / "2.patch", total_lines=1)
+    _write_single_line_modify_patch(commit_patch_dir / "10.patch")
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "trunk",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--threshold",
+            "60",
+            "--commitPatchDir",
+            str(commit_patch_dir),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["REPOSITORY"]["vcsType"] == "svn"
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 1
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.4
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert patch_text.index("# --- commit 2 ---") < patch_text.index("# --- commit 10 ---")

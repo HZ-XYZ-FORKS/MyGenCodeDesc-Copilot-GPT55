@@ -11,7 +11,7 @@ Format follows the [create-user-story](/.github/skills/create-user-story/SKILL.m
 ## Roles
 
 | Role | Definition | Source |
-|------|-----------|--------|
+| ------ | ---------- | ------ |
 | **codebase maintainer** | Person who uses `aggregateGenCodeDesc` to measure AI-generated code ratio across revisions. | [README.md](README.md) — "WHAT WE WANT" |
 | **tool developer** | Developer who builds, debugs, and maintains a fork of `aggregateGenCodeDesc`. | [README.md](README.md) — "WHAT WE WANT" |
 
@@ -770,7 +770,7 @@ Scenario: [Testability] Unit tests can set log level programmatically
 ```
 
 | US | Title | AC Count | Categories Covered |
-|----|-------|----------|--------------------|
+| -- | ----- | -------- | ------------------ |
 | US-001 | Core Metric Calculation | 7 | Typical, Edge |
 | US-002 | File-Level Conditions | 4 | Typical, Edge |
 | US-003 | Commit-Level Conditions | 6 | Typical, Edge |
@@ -782,6 +782,43 @@ Scenario: [Testability] Unit tests can set log level programmatically
 | US-009 | Algorithm-Specific Behavior | 9 | Typical, Edge, Fault |
 | US-010 | Diagnostics and Logging | 7 | Typical, Edge, Observability, Testability |
 | **Total** | | **59 AC** | |
+
+---
+
+## Current Fork Implementation Coverage Snapshot
+
+This section tracks **implemented and tested coverage in this fork**. It is intentionally separate from the appendix below, which describes what is applicable by VCS and algorithm in the BASE specification.
+
+Last verified: 2026-04-25 with `git diff --check && python3 -m pytest -v` (`19 passed`).
+
+| User Story | Current Status | Covered By | Remaining Gap |
+| ---------- | -------------- | ---------- | ------------- |
+| US-001 Core Metric Calculation | Covered for current vertical slice | UnitTesting covers AC-001-1 through AC-001-6. SysTesting covers AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7 across Algorithm A/B/C paths. | Broader non-happy-path algorithm workflows still belong to US-002 through US-010. |
+| US-002 File-Level Conditions | Not covered by dedicated tests | None yet. | Rename, rename+modify, deleted file, and copied file scenarios need dedicated UnitTesting/SysTesting. |
+| US-003 Commit-Level Conditions | Not covered by dedicated tests | None yet. | Merge, squash, cherry-pick, revert, amend, and rebase scenarios are not implemented as user-story tests. |
+| US-004 Line-Level Conditions | Partially exercised by AlgB replay tests | AlgB tests exercise modified lines, deleted lines, and new surviving lines as replay mechanics. | Dedicated AC-004 tests for ownership transfer, whitespace policy, line ending changes, identical re-adds, and moved lines are still missing. |
+| US-005 Branch and History Conditions | Partially covered | SysTesting covers the zero-denominator/no in-window-line behavior via AC-001-6. AlgB tests cover ordering mechanics that support history correctness. | Branch merges, long-lived branches, shallow clone behavior, and submodule/external handling remain untested. |
+| US-006 Destructive and Edge Conditions | Partially implemented, lightly tested | Loader validates repository identity and duplicate revision IDs. SysTesting covers a missing Algorithm B patch directory as a fatal CLI error. | Missing genCodeDesc, mismatched fields, duplicate records, invalid genRatio, and mandatory-argument misuse need explicit user-story tests. |
+| US-007 Git vs SVN Differences | Partially covered | AlgB UnitTesting/SysTesting covers SVN numeric `revisionId` replay ordering and `repoBranch="trunk"` acceptance. | Git SHA format validation, SVN branch path normalization, SVN merge limitation reporting, and Git-only condition skipping remain untested. |
+| US-008 Scale and Performance | Not covered | None yet. | Performance, streaming, empty commit window, and I/O failure scenarios are not implemented. |
+| US-009 Algorithm-Specific Behavior | Partially covered for Algorithm B | AlgB tests cover add/delete/modify replay, final surviving snapshot, Git parent-before-child ordering, SVN numeric revision ordering, ordered patch artifact output, and missing patch directory diagnostics. | AlgA rename/cross-file/VCS-unreachable behavior, AlgB multi-file multi-hunk replay and chained renames, and AlgC surviving-set/duplicate/mismatch behavior remain open. |
+| US-010 Diagnostics and Logging | Not covered | None yet. | `--logLevel`, structured logs, warning/error policy, and programmatic log configuration are not implemented. |
+
+### Traceability Detail
+
+| Test Area | Test File | User Story Coverage |
+| --------- | --------- | ------------------- |
+| Metric core UnitTesting | [tests/UnitTesting/test_metric_core.py](tests/UnitTesting/test_metric_core.py) | US-001 / AC-001-1 through AC-001-6 |
+| Algorithm B UnitTesting | [tests/UnitTesting/test_algorithm_b.py](tests/UnitTesting/test_algorithm_b.py) | US-001 / AC-001-7, US-007 / AC-007-2 partial, US-009 / AC-009-4 partial |
+| Protocol loader UnitTesting | [tests/UnitTesting/test_protocol_loader.py](tests/UnitTesting/test_protocol_loader.py) | JSONC loading regression; not yet mapped to a formal user-story AC |
+| CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7; US-007 / AC-007-2 partial; US-009 / AC-009-4 partial and AC-009-6 partial |
+
+### Recommended Next Coverage Slice
+
+1. US-009 / AC-009-4: add Algorithm B multi-file, multi-hunk replay tests.
+2. US-009 / AC-009-5 plus US-002 / AC-002-1 and AC-002-2: add rename and rename+modify replay coverage.
+3. US-006: add explicit negative validation SysTesting for mismatched repository identity, duplicate revision IDs, invalid genRatio, and missing genCodeDesc records.
+4. US-010: add logging and diagnostics contract before scaling to performance work.
 
 ---
 
@@ -810,7 +847,7 @@ SVN is legacy — supported to the extent that the protocol allows, but with kno
 ### VCS Coverage Per AC
 
 | AC | Git | SVN | Notes |
-|----|-----|-----|-------|
+| -- | --- | --- | ----- |
 | **US-001 (Core Metric)** | | | |
 | AC-001-1 ~ AC-001-7 | ✅ | ✅ | VCS-agnostic — pure math on genRatio values and sparse DETAIL semantics |
 | **US-002 (File-Level)** | | | |
@@ -847,7 +884,7 @@ SVN is legacy — supported to the extent that the protocol allows, but with kno
 ### Algorithm Coverage Per AC
 
 | AC | AlgA (live blame) | AlgB (diff replay) | AlgC (embedded blame) |
-|----|-------------------|---------------------|----------------------|
+| -- | ----------------- | ------------------- | -------------------- |
 | **US-001 ~ US-004** | ✅ | ✅ | ✅ |
 | AC-005-4 (shallow clone) | ✅ boundary hit | ✅ diffs unavailable beyond depth | ❌ N/A (self-sufficient) |
 | AC-006-1 (missing genCodeDesc) | ✅ genRatio=0 | ✅ genRatio=0 | ⚠️ chain break |

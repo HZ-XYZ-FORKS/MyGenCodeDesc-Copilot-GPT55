@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
             vcs_type=algorithm_result.vcs_type,
             diagnostics=algorithm_result.diagnostics,
         )
-        write_outputs(Path(args.outputDir), aggregate_record)
+        write_outputs(Path(args.outputDir), aggregate_record, patch_text=getattr(algorithm_result, "patch_text", ""))
     except Exception as error:
         print(f"aggregateGenCodeDesc: {error}", file=sys.stderr)
         return 2

@@ -65,12 +65,12 @@ def build_aggregate_record(
     }
 
 
-def write_outputs(output_dir: Path, aggregate_record: dict[str, Any]) -> None:
+def write_outputs(output_dir: Path, aggregate_record: dict[str, Any], patch_text: str = "") -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "genCodeDescV26.03.json").write_text(
         json.dumps(aggregate_record, indent=2), encoding="utf-8"
     )
-    (output_dir / "commitStart2EndTime.patch").write_text("", encoding="utf-8")
+    (output_dir / "commitStart2EndTime.patch").write_text(patch_text, encoding="utf-8")
 
 
 def _full_count(lines: list[GenerationLine]) -> int:

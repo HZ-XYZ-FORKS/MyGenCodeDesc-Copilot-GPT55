@@ -19,6 +19,7 @@ class AlgorithmBResult:
     input_protocol_version: str
     vcs_type: str
     diagnostics: dict[str, Any]
+    patch_text: str
 
 
 def collect_algorithm_b_lines(
@@ -42,6 +43,7 @@ def collect_algorithm_b_lines(
     snapshot: dict[str, list[LineOrigin]] = {}
     attribution_indexes: dict[str, dict[tuple[str, str, int], tuple[int, str]]] = {}
     revision_timestamps: dict[str, str] = {}
+    patch_sections: list[tuple[str, str]] = []
 
     for record in _sort_records_for_replay(loaded.records):
         repository = record["REPOSITORY"]
@@ -53,14 +55,17 @@ def collect_algorithm_b_lines(
             continue
 
         revision_id = repository["revisionId"]
+        patch_path = commit_patch_dir / f"{revision_id}.patch"
         attribution_indexes[revision_id] = _build_v2603_attribution_index(record, scope)
         revision_timestamps[revision_id] = revision_timestamp
         snapshot = _replay_patch(
             snapshot=snapshot,
-            patch_path=commit_patch_dir / f"{revision_id}.patch",
+            patch_path=patch_path,
             revision_id=revision_id,
             revision_timestamp=revision_timestamp,
         )
+        if start_dt <= revision_dt <= end_dt:
+            patch_sections.append((revision_id, patch_path.read_text(encoding="utf-8")))
 
     lines = _collect_surviving_lines(
         snapshot=snapshot,
@@ -77,6 +82,14 @@ def collect_algorithm_b_lines(
         input_protocol_version=loaded.protocol_version,
         vcs_type=vcs_type,
         diagnostics={"missingRevisions": [], "duplicateRevisions": [], "clockSkewDetected": False, "warnings": []},
+        patch_text=_build_patch_artifact(
+            repo_url=repo_url,
+            repo_branch=repo_branch,
+            start_time=start_time,
+            end_time=end_time,
+            scope=scope,
+            patch_sections=patch_sections,
+        ),
     )
 
 
@@ -103,6 +116,16 @@ class FilePatch:
 
 
 def _sort_records_for_replay(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    vcs_types = {str(record.get("REPOSITORY", {}).get("vcsType", "git")).lower() for record in records}
+    if vcs_types == {"git"} and any(_parent_revision_ids(record) for record in records):
+        return _sort_git_records_parent_first(records)
+    if vcs_types == {"svn"}:
+        return _sort_svn_records_by_revision(records)
+
+    return _sort_records_by_timestamp(records)
+
+
+def _sort_records_by_timestamp(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(
         records,
         key=lambda record: (
@@ -110,6 +133,59 @@ def _sort_records_for_replay(records: list[dict[str, Any]]) -> list[dict[str, An
             str(record["REPOSITORY"]["revisionId"]),
         ),
     )
+
+
+def _sort_git_records_parent_first(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records_by_revision = {str(record["REPOSITORY"]["revisionId"]): record for record in records}
+    visited: set[str] = set()
+    visiting: set[str] = set()
+    sorted_records: list[dict[str, Any]] = []
+
+    def visit(record: dict[str, Any]) -> None:
+        revision_id = str(record["REPOSITORY"]["revisionId"])
+        if revision_id in visited:
+            return
+        if revision_id in visiting:
+            raise ValueError(f"cycle detected in git parentRevisionIds at revision {revision_id}")
+
+        visiting.add(revision_id)
+        for parent_revision_id in sorted(_parent_revision_ids(record)):
+            parent_record = records_by_revision.get(parent_revision_id)
+            if parent_record is not None:
+                visit(parent_record)
+        visiting.remove(revision_id)
+        visited.add(revision_id)
+        sorted_records.append(record)
+
+    for record in _sort_records_by_timestamp(records):
+        visit(record)
+
+    return sorted_records
+
+
+def _parent_revision_ids(record: dict[str, Any]) -> list[str]:
+    repository = record.get("REPOSITORY", {})
+    parent_revision_ids = repository.get("parentRevisionIds", [])
+    if isinstance(parent_revision_ids, str):
+        return [parent_revision_ids]
+    return [str(parent_revision_id) for parent_revision_id in parent_revision_ids]
+
+
+def _sort_svn_records_by_revision(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        records,
+        key=lambda record: (
+            _svn_revision_number(str(record["REPOSITORY"]["revisionId"])),
+            parse_utc_datetime(record["REPOSITORY"]["revisionTimestamp"]),
+        ),
+    )
+
+
+def _svn_revision_number(revision_id: str) -> int:
+    normalized_revision_id = revision_id[1:] if revision_id.startswith(("r", "R")) else revision_id
+    if not normalized_revision_id.isdigit():
+        raise ValueError(f"SVN revisionId must be numeric: {revision_id}")
+    return int(normalized_revision_id)
 
 
 def _build_v2603_attribution_index(record: dict[str, Any], scope: str) -> dict[tuple[str, str, int], tuple[int, str]]:
@@ -299,6 +375,35 @@ def _collect_surviving_lines(
             )
 
     return lines
+
+
+def _build_patch_artifact(
+    repo_url: str,
+    repo_branch: str,
+    start_time: str,
+    end_time: str,
+    scope: str,
+    patch_sections: list[tuple[str, str]],
+) -> str:
+    parts = [
+        f"# repoURL: {repo_url}\n",
+        f"# repoBranch: {repo_branch}\n",
+        f"# startTime: {start_time}\n",
+        f"# endTime: {end_time}\n",
+        "# algorithm: B\n",
+        f"# scope: {scope}\n",
+        f"# aggregateRevisionId: aggregate:{start_time}..{end_time}\n",
+    ]
+    for revision_id, patch_text in patch_sections:
+        parts.append(f"# --- commit {revision_id} ---\n")
+        parts.append(_ensure_trailing_newline(patch_text))
+    return "".join(parts)
+
+
+def _ensure_trailing_newline(text: str) -> str:
+    if text.endswith("\n"):
+        return text
+    return f"{text}\n"
 
 
 def _normalize_patch_path(path: str) -> str | None:
