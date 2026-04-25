@@ -1,13 +1,9 @@
 # MyGenCodeDescBase
 
-- BASE of genCodeDesc, used to PlayKata with CodeAgent&LLM such as Copilot+[GPT,Opus,Sonnet].
-  - which means: we have WHAT&WHY of genCodeDesc in this BASE, then we fork genCodeDesc for different CodeAgent&LLM to implement WHEN&WHERE&HOW to genCodeDesc.
+- Based on genCodeDesc, PlayKata with Copilot+GPT-5.5-Xhigh.
   - use method: CaTDD(Comment-alive Test-Driven Development) from:
     - UserStory+UserGuide -> AcceptanceCriteria -> TestCase.
     - ArchDesign -> DetailDesign -> Implementation.
-
-- Example:
-  - `fork` MyGenCodeDescBase -> MyGenCodeDesc_Copilot_GPT-5.4-Xhigh_Python
 
 ---
 
@@ -49,7 +45,7 @@
   | Mostly AI (>=60) | 8 / 10 = **80%** |
 
 - We want a tool named **`aggregateGenCodeDesc`** to compute this metric.
-  - Language: **Python** or **C++** or **Rust** — each fork chooses one.
+  - Language: **Python**.
   - Input: `repoURL + repoBranch + startTime + endTime + threshold` + genCodeDesc metadata.
   - Output: aggregate result in genCodeDesc protocol-shaped JSON, including all three mode values.
   - Must support Algorithm A/B/C and Scope A/B/C/D as defined in this BASE.
