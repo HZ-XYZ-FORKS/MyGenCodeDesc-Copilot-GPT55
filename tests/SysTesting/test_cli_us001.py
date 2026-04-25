@@ -233,6 +233,56 @@ def _write_single_line_modify_patch(path):
     path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
 
 
+def _write_initial_multifile_patch(path):
+    patch_lines = [
+        "diff --git a/src/auth.py b/src/auth.py",
+        "new file mode 100644",
+        "index 0000000..1111111",
+        "--- /dev/null",
+        "+++ b/src/auth.py",
+        "@@ -0,0 +1,4 @@",
+        "+auth_1 = 1",
+        "+auth_2 = 2",
+        "+auth_3 = 3",
+        "+auth_4 = 4",
+        "diff --git a/src/helper.py b/src/helper.py",
+        "new file mode 100644",
+        "index 0000000..2222222",
+        "--- /dev/null",
+        "+++ b/src/helper.py",
+        "@@ -0,0 +1,3 @@",
+        "+helper_1 = 1",
+        "+helper_2 = 2",
+        "+helper_3 = 3",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
+def _write_multifile_multihunk_patch(path):
+    patch_lines = [
+        "diff --git a/src/auth.py b/src/auth.py",
+        "index 1111111..3333333 100644",
+        "--- a/src/auth.py",
+        "+++ b/src/auth.py",
+        "@@ -1,1 +1,1 @@",
+        "-auth_1 = 1",
+        "+auth_1 = 10",
+        "@@ -4,1 +4,2 @@",
+        "-auth_4 = 4",
+        "+auth_4 = 40",
+        "+auth_5 = 5",
+        "diff --git a/src/helper.py b/src/helper.py",
+        "index 2222222..4444444 100644",
+        "--- a/src/helper.py",
+        "+++ b/src/helper.py",
+        "@@ -2,2 +2,2 @@",
+        "-helper_2 = 2",
+        "+helper_2 = 20",
+        " helper_3 = 3",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
 def _run_git(repo_path, *args, env=None):
     completed = subprocess.run(
         ["git", *args],
@@ -244,6 +294,30 @@ def _run_git(repo_path, *args, env=None):
     )
     assert completed.returncode == 0, completed.stderr
     return completed.stdout.strip()
+
+
+def _v2603_multifile_record(repo_url, revision_id, revision_timestamp, file_details, total_code_lines):
+    return {
+        "protocolName": "generatedTextDesc",
+        "protocolVersion": "26.03",
+        "codeAgent": "SysTestingFixture",
+        "SUMMARY": {
+            "totalCodeLines": total_code_lines,
+            "fullGeneratedCodeLines": 0,
+            "partialGeneratedCodeLines": 0,
+            "totalDocLines": 0,
+            "fullGeneratedDocLines": 0,
+            "partialGeneratedDocLines": 0,
+        },
+        "DETAIL": file_details,
+        "REPOSITORY": {
+            "vcsType": "git",
+            "repoURL": repo_url,
+            "repoBranch": "main",
+            "revisionId": revision_id,
+            "revisionTimestamp": revision_timestamp,
+        },
+    }
 
 
 def _make_git_repo_with_auth_file(repo_path):
@@ -786,3 +860,127 @@ def test_aggregate_gen_code_desc_py_algorithm_b_uses_svn_revision_order_over_tim
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.4
     patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
     assert patch_text.index("# --- commit 2 ---") < patch_text.index("# --- commit 10 ---")
+
+
+# US-009 / AC-009-4 / Algorithm B multi-file multi-hunk replay / TC-SYS-009
+def test_aggregate_gen_code_desc_py_algorithm_b_replays_multifile_multihunk_patch(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_multifile_record(
+            "https://example.test/repo",
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {
+                    "fileName": "src/auth.py",
+                    "codeLines": [
+                        {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                        {"lineLocation": 4, "genRatio": 70, "genMethod": "vibeCoding"},
+                    ],
+                },
+                {
+                    "fileName": "src/helper.py",
+                    "codeLines": [
+                        {"lineLocation": 1, "genRatio": 80, "genMethod": "vibeCoding"},
+                        {"lineLocation": 3, "genRatio": 100, "genMethod": "codeCompletion"},
+                    ],
+                },
+            ],
+            7,
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "rev2.json",
+        _v2603_multifile_record(
+            "https://example.test/repo",
+            "rev2",
+            "2026-01-11T00:00:00Z",
+            [
+                {
+                    "fileName": "src/auth.py",
+                    "codeLines": [
+                        {"lineLocation": 1, "genRatio": 40, "genMethod": "vibeCoding"},
+                        {"lineLocation": 4, "genRatio": 90, "genMethod": "vibeCoding"},
+                        {"lineLocation": 5, "genRatio": 100, "genMethod": "codeCompletion"},
+                    ],
+                },
+                {
+                    "fileName": "src/helper.py",
+                    "codeLines": [
+                        {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+                    ],
+                },
+            ],
+            8,
+        ),
+    )
+    _write_initial_multifile_patch(commit_patch_dir / "rev1.patch")
+    _write_multifile_multihunk_patch(commit_patch_dir / "rev2.patch")
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--threshold",
+            "60",
+            "--commitPatchDir",
+            str(commit_patch_dir),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 8
+    assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 2
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 4
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.5875
+    assert aggregate["AGGREGATE"]["metrics"]["fullyAI"]["value"] == 0.25
+    assert aggregate["AGGREGATE"]["metrics"]["mostlyAI"]["value"] == 0.625
+    assert aggregate["DETAIL"] == [
+        {
+            "fileName": "src/auth.py",
+            "codeLines": [
+                {"lineLocation": 1, "genRatio": 40, "genMethod": "vibeCoding"},
+                {"lineLocation": 4, "genRatio": 90, "genMethod": "vibeCoding"},
+                {"lineLocation": 5, "genRatio": 100, "genMethod": "codeCompletion"},
+            ],
+        },
+        {
+            "fileName": "src/helper.py",
+            "codeLines": [
+                {"lineLocation": 1, "genRatio": 80, "genMethod": "vibeCoding"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+                {"lineLocation": 3, "genRatio": 100, "genMethod": "codeCompletion"},
+            ],
+        },
+    ]
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert "diff --git a/src/auth.py b/src/auth.py" in patch_text
+    assert "diff --git a/src/helper.py b/src/helper.py" in patch_text
+    assert "@@ -4,1 +4,2 @@" in patch_text

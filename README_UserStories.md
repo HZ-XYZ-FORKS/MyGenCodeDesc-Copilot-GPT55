@@ -789,7 +789,7 @@ Scenario: [Testability] Unit tests can set log level programmatically
 
 This section tracks **implemented and tested coverage in this fork**. It is intentionally separate from the appendix below, which describes what is applicable by VCS and algorithm in the BASE specification.
 
-Last verified: 2026-04-25 with `git diff --check && python3 -m pytest -v` (`19 passed`).
+Last verified: 2026-04-25 with `git diff --check && python3 -m pytest -v` (`21 passed`).
 
 | User Story | Current Status | Covered By | Remaining Gap |
 | ---------- | -------------- | ---------- | ------------- |
@@ -801,7 +801,7 @@ Last verified: 2026-04-25 with `git diff --check && python3 -m pytest -v` (`19 p
 | US-006 Destructive and Edge Conditions | Partially implemented, lightly tested | Loader validates repository identity and duplicate revision IDs. SysTesting covers a missing Algorithm B patch directory as a fatal CLI error. | Missing genCodeDesc, mismatched fields, duplicate records, invalid genRatio, and mandatory-argument misuse need explicit user-story tests. |
 | US-007 Git vs SVN Differences | Partially covered | AlgB UnitTesting/SysTesting covers SVN numeric `revisionId` replay ordering and `repoBranch="trunk"` acceptance. | Git SHA format validation, SVN branch path normalization, SVN merge limitation reporting, and Git-only condition skipping remain untested. |
 | US-008 Scale and Performance | Not covered | None yet. | Performance, streaming, empty commit window, and I/O failure scenarios are not implemented. |
-| US-009 Algorithm-Specific Behavior | Partially covered for Algorithm B | AlgB tests cover add/delete/modify replay, final surviving snapshot, Git parent-before-child ordering, SVN numeric revision ordering, ordered patch artifact output, and missing patch directory diagnostics. | AlgA rename/cross-file/VCS-unreachable behavior, AlgB multi-file multi-hunk replay and chained renames, and AlgC surviving-set/duplicate/mismatch behavior remain open. |
+| US-009 Algorithm-Specific Behavior | Partially covered for Algorithm B | AlgB tests cover add/delete/modify replay, multi-file/multi-hunk replay, final surviving snapshot, Git parent-before-child ordering, SVN numeric revision ordering, ordered patch artifact output, and missing patch directory diagnostics. | AlgA rename/cross-file/VCS-unreachable behavior, AlgB chained renames, and AlgC surviving-set/duplicate/mismatch behavior remain open. |
 | US-010 Diagnostics and Logging | Not covered | None yet. | `--logLevel`, structured logs, warning/error policy, and programmatic log configuration are not implemented. |
 
 ### Traceability Detail
@@ -809,16 +809,15 @@ Last verified: 2026-04-25 with `git diff --check && python3 -m pytest -v` (`19 p
 | Test Area | Test File | User Story Coverage |
 | --------- | --------- | ------------------- |
 | Metric core UnitTesting | [tests/UnitTesting/test_metric_core.py](tests/UnitTesting/test_metric_core.py) | US-001 / AC-001-1 through AC-001-6 |
-| Algorithm B UnitTesting | [tests/UnitTesting/test_algorithm_b.py](tests/UnitTesting/test_algorithm_b.py) | US-001 / AC-001-7, US-007 / AC-007-2 partial, US-009 / AC-009-4 partial |
+| Algorithm B UnitTesting | [tests/UnitTesting/test_algorithm_b.py](tests/UnitTesting/test_algorithm_b.py) | US-001 / AC-001-7, US-007 / AC-007-2 partial, US-009 / AC-009-4 covered for synthetic replay fixtures |
 | Protocol loader UnitTesting | [tests/UnitTesting/test_protocol_loader.py](tests/UnitTesting/test_protocol_loader.py) | JSONC loading regression; not yet mapped to a formal user-story AC |
-| CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7; US-007 / AC-007-2 partial; US-009 / AC-009-4 partial and AC-009-6 partial |
+| CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7; US-007 / AC-007-2 partial; US-009 / AC-009-4 covered for synthetic replay fixtures and AC-009-6 partial |
 
 ### Recommended Next Coverage Slice
 
-1. US-009 / AC-009-4: add Algorithm B multi-file, multi-hunk replay tests.
-2. US-009 / AC-009-5 plus US-002 / AC-002-1 and AC-002-2: add rename and rename+modify replay coverage.
-3. US-006: add explicit negative validation SysTesting for mismatched repository identity, duplicate revision IDs, invalid genRatio, and missing genCodeDesc records.
-4. US-010: add logging and diagnostics contract before scaling to performance work.
+1. US-009 / AC-009-5 plus US-002 / AC-002-1 and AC-002-2: add rename and rename+modify replay coverage.
+2. US-006: add explicit negative validation SysTesting for mismatched repository identity, duplicate revision IDs, invalid genRatio, and missing genCodeDesc records.
+3. US-010: add logging and diagnostics contract before scaling to performance work.
 
 ---
 

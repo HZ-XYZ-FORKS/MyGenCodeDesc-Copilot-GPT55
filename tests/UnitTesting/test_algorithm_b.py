@@ -54,6 +54,56 @@ def _write_single_line_modify_patch(path):
     path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
 
 
+def _write_initial_multifile_patch(path):
+    patch_lines = [
+        "diff --git a/src/auth.py b/src/auth.py",
+        "new file mode 100644",
+        "index 0000000..1111111",
+        "--- /dev/null",
+        "+++ b/src/auth.py",
+        "@@ -0,0 +1,4 @@",
+        "+auth_1 = 1",
+        "+auth_2 = 2",
+        "+auth_3 = 3",
+        "+auth_4 = 4",
+        "diff --git a/src/helper.py b/src/helper.py",
+        "new file mode 100644",
+        "index 0000000..2222222",
+        "--- /dev/null",
+        "+++ b/src/helper.py",
+        "@@ -0,0 +1,3 @@",
+        "+helper_1 = 1",
+        "+helper_2 = 2",
+        "+helper_3 = 3",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
+def _write_multifile_multihunk_patch(path):
+    patch_lines = [
+        "diff --git a/src/auth.py b/src/auth.py",
+        "index 1111111..3333333 100644",
+        "--- a/src/auth.py",
+        "+++ b/src/auth.py",
+        "@@ -1,1 +1,1 @@",
+        "-auth_1 = 1",
+        "+auth_1 = 10",
+        "@@ -4,1 +4,2 @@",
+        "-auth_4 = 4",
+        "+auth_4 = 40",
+        "+auth_5 = 5",
+        "diff --git a/src/helper.py b/src/helper.py",
+        "index 2222222..4444444 100644",
+        "--- a/src/helper.py",
+        "+++ b/src/helper.py",
+        "@@ -2,2 +2,2 @@",
+        "-helper_2 = 2",
+        "+helper_2 = 20",
+        " helper_3 = 3",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
 def _v2603_record_for_revision(
     revision_id,
     revision_timestamp,
@@ -92,6 +142,30 @@ def _v2603_record_for_revision(
             }
         ],
         "REPOSITORY": repository,
+    }
+
+
+def _v2603_multi_file_record_for_revision(revision_id, revision_timestamp, file_details, total_code_lines):
+    return {
+        "protocolName": "generatedTextDesc",
+        "protocolVersion": "26.03",
+        "codeAgent": "UnitTestingFixture",
+        "SUMMARY": {
+            "totalCodeLines": total_code_lines,
+            "fullGeneratedCodeLines": 0,
+            "partialGeneratedCodeLines": 0,
+            "totalDocLines": 0,
+            "fullGeneratedDocLines": 0,
+            "partialGeneratedDocLines": 0,
+        },
+        "DETAIL": file_details,
+        "REPOSITORY": {
+            "vcsType": "git",
+            "repoURL": "https://example.test/repo",
+            "repoBranch": "main",
+            "revisionId": revision_id,
+            "revisionTimestamp": revision_timestamp,
+        },
     }
 
 
@@ -333,3 +407,88 @@ def test_algorithm_b_replays_svn_numeric_revisions_before_timestamp_order(tmp_pa
         ("src/auth.py", 1, 40, "vibeCoding"),
     ]
     assert result.patch_text.index("# --- commit 2 ---") < result.patch_text.index("# --- commit 10 ---")
+
+
+# US-009 / AC-009-4 / Algorithm B multi-file multi-hunk replay / TC-UNIT-012
+def test_algorithm_b_replays_every_file_section_and_hunk_in_a_patch(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_multi_file_record_for_revision(
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {
+                    "fileName": "src/auth.py",
+                    "codeLines": [
+                        {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                        {"lineLocation": 4, "genRatio": 70, "genMethod": "vibeCoding"},
+                    ],
+                },
+                {
+                    "fileName": "src/helper.py",
+                    "codeLines": [
+                        {"lineLocation": 1, "genRatio": 80, "genMethod": "vibeCoding"},
+                        {"lineLocation": 3, "genRatio": 100, "genMethod": "codeCompletion"},
+                    ],
+                },
+            ],
+            7,
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "rev2.json",
+        _v2603_multi_file_record_for_revision(
+            "rev2",
+            "2026-01-11T00:00:00Z",
+            [
+                {
+                    "fileName": "src/auth.py",
+                    "codeLines": [
+                        {"lineLocation": 1, "genRatio": 40, "genMethod": "vibeCoding"},
+                        {"lineLocation": 4, "genRatio": 90, "genMethod": "vibeCoding"},
+                        {"lineLocation": 5, "genRatio": 100, "genMethod": "codeCompletion"},
+                    ],
+                },
+                {
+                    "fileName": "src/helper.py",
+                    "codeLines": [
+                        {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+                    ],
+                },
+            ],
+            8,
+        ),
+    )
+    _write_initial_multifile_patch(commit_patch_dir / "rev1.patch")
+    _write_multifile_multihunk_patch(commit_patch_dir / "rev2.patch")
+
+    result = collect_algorithm_b_lines(
+        gen_code_desc_dir=gen_code_desc_dir,
+        repo_url="https://example.test/repo",
+        repo_branch="main",
+        commit_patch_dir=commit_patch_dir,
+        start_time="2026-01-01T00:00:00Z",
+        end_time="2026-01-31T00:00:00Z",
+        scope="A",
+    )
+    metrics = calculate_metrics(result.lines, threshold=60)
+
+    assert [(line.file_name, line.line_number, line.gen_ratio, line.gen_method) for line in result.lines] == [
+        ("src/auth.py", 1, 40, "vibeCoding"),
+        ("src/auth.py", 2, 0, "Manual"),
+        ("src/auth.py", 3, 0, "Manual"),
+        ("src/auth.py", 4, 90, "vibeCoding"),
+        ("src/auth.py", 5, 100, "codeCompletion"),
+        ("src/helper.py", 1, 80, "vibeCoding"),
+        ("src/helper.py", 2, 60, "vibeCoding"),
+        ("src/helper.py", 3, 100, "codeCompletion"),
+    ]
+    assert metrics.total_lines == 8
+    assert metrics.weighted.value == pytest.approx(0.5875)
+    assert metrics.fully_ai.value == pytest.approx(0.25)
+    assert metrics.mostly_ai.value == pytest.approx(0.625)
+    assert "diff --git a/src/helper.py b/src/helper.py" in result.patch_text

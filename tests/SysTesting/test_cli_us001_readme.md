@@ -12,7 +12,7 @@ Implemented / Passing
 
 - US-001: Core Metric Calculation.
 - US-007 / AC-007-2: SVN numeric `revisionId` behavior through the real CLI.
-- US-009 / AC-009-4: Algorithm B ordered replay and final surviving snapshot behavior, partially covered for single-file fixtures.
+- US-009 / AC-009-4: Algorithm B ordered replay and final surviving snapshot behavior, covered for synthetic single-file and multi-file/multi-hunk fixtures.
 - US-009 / AC-009-6: Algorithm B missing patch directory reports a fatal CLI error.
 - AC-001-1: Weighted mode calculates sum of genRatio.
 - AC-001-2: Fully AI mode counts only genRatio==100.
@@ -23,7 +23,7 @@ Implemented / Passing
 - System behavior: top-level `aggregateGenCodeDesc.py` writes `genCodeDescV26.03.json` and `commitStart2EndTime.patch`.
 - Algorithm coverage: A, B, and C.
 - Protocol coverage: v26.03 and v26.04.
-- Algorithm B replay coverage: add-only patches, multi-patch delete/modify/add replay, Git parent-before-child ordering, SVN numeric revision ordering, final snapshot denominator, ordered patch artifact output, and missing patch directory diagnostics.
+- Algorithm B replay coverage: add-only patches, multi-patch delete/modify/add replay, multi-file/multi-hunk patch replay, Git parent-before-child ordering, SVN numeric revision ordering, final snapshot denominator, ordered patch artifact output, and missing patch directory diagnostics.
 
 ## Manual
 
