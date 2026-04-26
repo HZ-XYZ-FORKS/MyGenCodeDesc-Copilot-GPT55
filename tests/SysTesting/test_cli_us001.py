@@ -260,6 +260,29 @@ def _write_pure_rename_patch_for_paths(path, old_file_name, new_file_name):
     path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
 
 
+def _write_delete_file_patch(path, file_name="src/auth.py", total_lines=3):
+    patch_lines = [
+        f"diff --git a/{file_name} b/{file_name}",
+        "deleted file mode 100644",
+        "index 1111111..0000000",
+        f"--- a/{file_name}",
+        "+++ /dev/null",
+        f"@@ -1,{total_lines} +0,0 @@",
+        *[f"-value_{line_number} = {line_number}" for line_number in range(1, total_lines + 1)],
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
+def _write_pure_copy_patch(path, old_file_name="src/auth.py", new_file_name="src/auth_copy.py"):
+    patch_lines = [
+        f"diff --git a/{old_file_name} b/{new_file_name}",
+        "similarity index 100%",
+        f"copy from {old_file_name}",
+        f"copy to {new_file_name}",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
 def _write_rename_modify_patch(path):
     patch_lines = [
         "diff --git a/src/auth.py b/src/account.py",
@@ -1309,3 +1332,185 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_chained_renames(tmp_path
     assert patch_text.index("# --- commit rev2 ---") < patch_text.index("# --- commit rev3 ---")
     assert "rename from src/v1.py" in patch_text
     assert "rename to src/v3.py" in patch_text
+
+
+# US-002 / AC-002-3 / Algorithm B deleted file / TC-SYS-013
+def test_aggregate_gen_code_desc_py_algorithm_b_excludes_deleted_file(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+            ],
+            3,
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "rev2.json",
+        _v2603_multifile_record(
+            "https://example.test/repo",
+            "rev2",
+            "2026-01-11T00:00:00Z",
+            [],
+            0,
+        ),
+    )
+    _write_add_only_patch(commit_patch_dir / "rev1.patch", total_lines=3)
+    _write_delete_file_patch(commit_patch_dir / "rev2.patch", total_lines=3)
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--threshold",
+            "60",
+            "--commitPatchDir",
+            str(commit_patch_dir),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 0
+    assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 0
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 0
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.0
+    assert aggregate["AGGREGATE"]["metrics"]["fullyAI"]["value"] == 0.0
+    assert aggregate["AGGREGATE"]["metrics"]["mostlyAI"]["value"] == 0.0
+    assert aggregate["DETAIL"] == []
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert "+++ /dev/null" in patch_text
+
+
+# US-002 / AC-002-4 / Algorithm B copied file / TC-SYS-014
+def test_aggregate_gen_code_desc_py_algorithm_b_attributes_copied_file_to_copy_commit(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+            ],
+            3,
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "rev2.json",
+        _v2603_multifile_record(
+            "https://example.test/repo",
+            "rev2",
+            "2026-01-11T00:00:00Z",
+            [
+                {
+                    "fileName": "src/auth_copy.py",
+                    "codeLines": [
+                        {"lineLocation": 1, "genRatio": 40, "genMethod": "vibeCoding"},
+                        {"lineLocation": 2, "genRatio": 100, "genMethod": "codeCompletion"},
+                        {"lineLocation": 3, "genRatio": 70, "genMethod": "vibeCoding"},
+                    ],
+                }
+            ],
+            6,
+        ),
+    )
+    _write_add_only_patch(commit_patch_dir / "rev1.patch", total_lines=3)
+    _write_pure_copy_patch(commit_patch_dir / "rev2.patch")
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--threshold",
+            "60",
+            "--commitPatchDir",
+            str(commit_patch_dir),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 6
+    assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 2
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 3
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.6166666667
+    assert aggregate["AGGREGATE"]["metrics"]["fullyAI"]["value"] == 0.3333333333
+    assert aggregate["AGGREGATE"]["metrics"]["mostlyAI"]["value"] == 0.6666666667
+    assert aggregate["DETAIL"] == [
+        {
+            "fileName": "src/auth.py",
+            "codeLines": [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+            ],
+        },
+        {
+            "fileName": "src/auth_copy.py",
+            "codeLines": [
+                {"lineLocation": 1, "genRatio": 40, "genMethod": "vibeCoding"},
+                {"lineLocation": 2, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 3, "genRatio": 70, "genMethod": "vibeCoding"},
+            ],
+        },
+    ]
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert "copy from src/auth.py" in patch_text
+    assert "copy to src/auth_copy.py" in patch_text

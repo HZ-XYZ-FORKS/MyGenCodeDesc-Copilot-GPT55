@@ -112,6 +112,7 @@ class PatchHunk:
 class FilePatch:
     old_path: str | None = None
     new_path: str | None = None
+    is_copy: bool = False
     hunks: list[PatchHunk] = field(default_factory=list)
 
 
@@ -218,6 +219,22 @@ def _replay_patch(
         old_file = source_file or target_file
         new_file = target_file or source_file
         old_lines = list(next_snapshot.get(old_file or "", []))
+        if file_patch.is_copy and target_file is not None:
+            copied_lines = _copy_lines_to_revision(
+                source_lines=old_lines,
+                target_file=target_file,
+                revision_id=revision_id,
+                revision_timestamp=revision_timestamp,
+            )
+            next_snapshot[target_file] = _apply_hunks(
+                old_lines=copied_lines,
+                hunks=file_patch.hunks,
+                target_file=target_file,
+                revision_id=revision_id,
+                revision_timestamp=revision_timestamp,
+            )
+            continue
+
         replayed_lines = _apply_hunks(
             old_lines=old_lines,
             hunks=file_patch.hunks,
@@ -265,6 +282,14 @@ def _parse_file_patches(patch_path: Path) -> list[FilePatch]:
             continue
         if raw_line.startswith("rename to "):
             current_file_patch.new_path = _normalize_patch_path(raw_line.removeprefix("rename to "))
+            continue
+        if raw_line.startswith("copy from "):
+            current_file_patch.old_path = _normalize_patch_path(raw_line.removeprefix("copy from "))
+            current_file_patch.is_copy = True
+            continue
+        if raw_line.startswith("copy to "):
+            current_file_patch.new_path = _normalize_patch_path(raw_line.removeprefix("copy to "))
+            current_file_patch.is_copy = True
             continue
 
         hunk_match = HUNK_HEADER.match(raw_line)
@@ -327,6 +352,23 @@ def _apply_hunks(
         old_cursor += 1
 
     return replayed_lines
+
+
+def _copy_lines_to_revision(
+    source_lines: list[LineOrigin],
+    target_file: str,
+    revision_id: str,
+    revision_timestamp: str,
+) -> list[LineOrigin]:
+    return [
+        LineOrigin(
+            origin_revision_id=revision_id,
+            origin_timestamp=revision_timestamp,
+            origin_file_name=target_file,
+            origin_line_number=line_number,
+        )
+        for line_number, _source_line in enumerate(source_lines, start=1)
+    ]
 
 
 def _existing_or_legacy_origin(old_lines: list[LineOrigin], old_cursor: int, target_file: str) -> LineOrigin:

@@ -789,12 +789,12 @@ Scenario: [Testability] Unit tests can set log level programmatically
 
 This section tracks **implemented and tested coverage in this fork**. It is intentionally separate from the appendix below, which describes what is applicable by VCS and algorithm in the BASE specification.
 
-Last verified: 2026-04-26 with `git diff --check && python3 -m pytest -v` (`32 passed`).
+Last verified: 2026-04-26 with `git diff --check && python3 -m pytest -v` (`36 passed`).
 
 | User Story | Current Status | Covered By | Remaining Gap |
 | ---------- | -------------- | ---------- | ------------- |
 | US-001 Core Metric Calculation | Covered for current vertical slice | UnitTesting covers AC-001-1 through AC-001-6. SysTesting covers AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7 across Algorithm A/B/C paths. | Broader non-happy-path algorithm workflows still belong to US-002 through US-010. |
-| US-002 File-Level Conditions | Partially covered for Algorithm B | AlgB UnitTesting/SysTesting covers pure rename and rename+modify replay with final path attribution. | Deleted file and copied file scenarios still need dedicated UnitTesting/SysTesting. |
+| US-002 File-Level Conditions | Covered for current Algorithm B synthetic fixtures | AlgB UnitTesting/SysTesting covers pure rename, rename+modify, deleted file exclusion, and copied file attribution with the original source retained. | Broader real-repository coverage for AlgA/AlgC and VCS-specific copy edge cases remains open. |
 | US-003 Commit-Level Conditions | Not covered by dedicated tests | None yet. | Merge, squash, cherry-pick, revert, amend, and rebase scenarios are not implemented as user-story tests. |
 | US-004 Line-Level Conditions | Partially exercised by AlgB replay tests | AlgB tests exercise modified lines, deleted lines, and new surviving lines as replay mechanics. | Dedicated AC-004 tests for ownership transfer, whitespace policy, line ending changes, identical re-adds, and moved lines are still missing. |
 | US-005 Branch and History Conditions | Partially covered | SysTesting covers the zero-denominator/no in-window-line behavior via AC-001-6. AlgB tests cover ordering mechanics that support history correctness. | Branch merges, long-lived branches, shallow clone behavior, and submodule/external handling remain untested. |
@@ -809,16 +809,16 @@ Last verified: 2026-04-26 with `git diff --check && python3 -m pytest -v` (`32 p
 | Test Area | Test File | User Story Coverage |
 | --------- | --------- | ------------------- |
 | Metric core UnitTesting | [tests/UnitTesting/test_metric_core.py](tests/UnitTesting/test_metric_core.py) | US-001 / AC-001-1 through AC-001-6 |
-| Algorithm B UnitTesting | [tests/UnitTesting/test_algorithm_b.py](tests/UnitTesting/test_algorithm_b.py) | US-001 / AC-001-7, US-002 / AC-002-1 and AC-002-2 covered for synthetic AlgB fixtures, US-007 / AC-007-2 partial, US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures |
+| Algorithm B UnitTesting | [tests/UnitTesting/test_algorithm_b.py](tests/UnitTesting/test_algorithm_b.py) | US-001 / AC-001-7, US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures, US-007 / AC-007-2 partial, US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures |
 | Protocol loader UnitTesting | [tests/UnitTesting/test_protocol_loader.py](tests/UnitTesting/test_protocol_loader.py) | JSONC loading regression; not yet mapped to a formal user-story AC |
-| CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7; US-002 / AC-002-1 and AC-002-2 covered for synthetic AlgB fixtures; US-007 / AC-007-2 partial; US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures and AC-009-6 partial |
+| CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7; US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures; US-007 / AC-007-2 partial; US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures and AC-009-6 partial |
 | CLI Validation SysTesting | [tests/SysTesting/test_cli_us006.py](tests/SysTesting/test_cli_us006.py) | US-006 / AC-006-1 partial empty-input coverage, AC-006-2, AC-006-3 fatal-reject policy, AC-006-5 |
 
 ### Recommended Next Coverage Slice
 
-1. US-002 / AC-002-3 and AC-002-4: add deleted-file and copied-file replay coverage.
-2. US-006 / AC-006-4 plus US-010: define clock-skew and diagnostics/logging policy before deeper validation expansion.
-3. US-003: add commit workflow coverage for merge, squash, cherry-pick, revert, amend, and rebase scenarios.
+1. US-006 / AC-006-4 plus US-010: define clock-skew and diagnostics/logging policy before deeper validation expansion.
+2. US-003: add commit workflow coverage for merge, squash, cherry-pick, revert, amend, and rebase scenarios.
+3. US-004: add dedicated line-level ownership transfer tests for human edits, AI rewrites, whitespace, line endings, identical re-adds, and moved lines.
 
 ---
 
