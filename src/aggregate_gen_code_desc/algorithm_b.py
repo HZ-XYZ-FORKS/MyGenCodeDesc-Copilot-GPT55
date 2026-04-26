@@ -38,6 +38,10 @@ def collect_algorithm_b_lines(
     if loaded.protocol_version != "26.03":
         raise ValueError("Algorithm B requires protocolVersion 26.03 input")
 
+    replay_records, orphaned_revision_ids = _records_in_patch_history(loaded.records, commit_patch_dir)
+    if not replay_records:
+        raise ValueError("no genCodeDesc records match commitPatchDir patch history")
+
     start_dt = parse_utc_datetime(start_time)
     end_dt = parse_utc_datetime(end_time)
     snapshot: dict[str, list[LineOrigin]] = {}
@@ -45,7 +49,7 @@ def collect_algorithm_b_lines(
     revision_timestamps: dict[str, str] = {}
     patch_sections: list[tuple[str, str]] = []
 
-    for record in _sort_records_for_replay(loaded.records):
+    for record in _sort_records_for_replay(replay_records):
         repository = record["REPOSITORY"]
         revision_timestamp = repository.get("revisionTimestamp")
         if revision_timestamp is None:
@@ -76,7 +80,12 @@ def collect_algorithm_b_lines(
         scope=scope,
     )
 
-    vcs_type = loaded.records[-1].get("REPOSITORY", {}).get("vcsType", "git")
+    warnings = list(loaded.warnings)
+    if orphaned_revision_ids:
+        warnings.append(f"ignored orphaned genCodeDesc revisions absent from patch history: {', '.join(orphaned_revision_ids)}")
+
+    vcs_type = replay_records[-1].get("REPOSITORY", {}).get("vcsType", "git")
+    replay_revision_ids = {str(record["REPOSITORY"]["revisionId"]) for record in replay_records}
     return AlgorithmBResult(
         lines=lines,
         input_protocol_version=loaded.protocol_version,
@@ -85,8 +94,9 @@ def collect_algorithm_b_lines(
             "missingRevisions": [],
             "duplicateRevisions": [],
             "clockSkewDetected": False,
-            "warnings": loaded.warnings,
-            "recordsLoaded": loaded.record_summaries,
+            "warnings": warnings,
+            "orphanedRevisions": orphaned_revision_ids,
+            "recordsLoaded": [summary for summary in loaded.record_summaries if summary["revisionId"] in replay_revision_ids],
         },
         patch_text=_build_patch_artifact(
             repo_url=repo_url,
@@ -97,6 +107,23 @@ def collect_algorithm_b_lines(
             patch_sections=patch_sections,
         ),
     )
+
+
+def _records_in_patch_history(records: list[dict[str, Any]], commit_patch_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    patch_revision_ids = {
+        path.name.removesuffix(".patch")
+        for path in commit_patch_dir.glob("*.patch")
+        if path.is_file() and path.name.endswith(".patch")
+    }
+    replay_records = []
+    orphaned_revision_ids = []
+    for record in records:
+        revision_id = str(record["REPOSITORY"]["revisionId"])
+        if revision_id in patch_revision_ids:
+            replay_records.append(record)
+        else:
+            orphaned_revision_ids.append(revision_id)
+    return replay_records, sorted(orphaned_revision_ids)
 
 
 @dataclass(frozen=True)

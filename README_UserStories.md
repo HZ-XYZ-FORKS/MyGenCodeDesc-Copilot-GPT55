@@ -789,13 +789,13 @@ Scenario: [Testability] Unit tests can set log level programmatically
 
 This section tracks **implemented and tested coverage in this fork**. It is intentionally separate from the appendix below, which describes what is applicable by VCS and algorithm in the BASE specification.
 
-Last verified: 2026-04-27 with `git diff --check && python3 -m pytest -v` (`43 passed`).
+Last verified: 2026-04-27 with `git diff --check && python3 -m pytest -v` (`51 passed`).
 
 | User Story | Current Status | Covered By | Remaining Gap |
 | ---------- | -------------- | ---------- | ------------- |
 | US-001 Core Metric Calculation | Covered for current vertical slice | UnitTesting covers AC-001-1 through AC-001-6. SysTesting covers AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7 across Algorithm A/B/C paths. | Broader non-happy-path algorithm workflows still belong to US-002 through US-010. |
 | US-002 File-Level Conditions | Covered for current Algorithm B synthetic fixtures | AlgB UnitTesting/SysTesting covers pure rename, rename+modify, deleted file exclusion, and copied file attribution with the original source retained. | Broader real-repository coverage for AlgA/AlgC and VCS-specific copy edge cases remains open. |
-| US-003 Commit-Level Conditions | Not covered by dedicated tests | None yet. | Merge, squash, cherry-pick, revert, amend, and rebase scenarios are not implemented as user-story tests. |
+| US-003 Commit-Level Conditions | Covered for current Algorithm B synthetic fixtures | Algorithm B UnitTesting covers merge, squash merge, cherry-pick, revert, amend/force-push orphan handling, and rebase regenerated revisionIds. Root CLI SysTesting covers amend/force-push and rebase orphan handling through `aggregateGenCodeDesc.py --algorithm B`. | Broader real-repository coverage for AlgA/AlgC, root CLI merge/squash/cherry-pick/revert fixtures, and VCS-provider-specific branch workflows remain open. |
 | US-004 Line-Level Conditions | Partially exercised by AlgB replay tests | AlgB tests exercise modified lines, deleted lines, and new surviving lines as replay mechanics. | Dedicated AC-004 tests for ownership transfer, whitespace policy, line ending changes, identical re-adds, and moved lines are still missing. |
 | US-005 Branch and History Conditions | Partially covered | SysTesting covers the zero-denominator/no in-window-line behavior via AC-001-6. AlgB tests cover ordering mechanics that support history correctness. | Branch merges, long-lived branches, shallow clone behavior, and submodule/external handling remain untested. |
 | US-006 Destructive and Edge Conditions | Partially covered by CLI validation tests | SysTesting covers empty genCodeDesc input, mismatched repoURL, mismatched repoBranch, duplicate revision IDs, invalid genRatio, AlgC parent/child clock skew rejection, and missing Algorithm B patch directory as fatal CLI errors with no partial output. | True per-revision missing genCodeDesc chain handling beyond empty input, corrupted JSON/schema validation breadth, and mandatory-argument misuse remain open. |
@@ -810,17 +810,19 @@ Last verified: 2026-04-27 with `git diff --check && python3 -m pytest -v` (`43 p
 | --------- | --------- | ------------------- |
 | Metric core UnitTesting | [tests/UnitTesting/test_metric_core.py](tests/UnitTesting/test_metric_core.py) | US-001 / AC-001-1 through AC-001-6 |
 | Algorithm B UnitTesting | [tests/UnitTesting/test_algorithm_b.py](tests/UnitTesting/test_algorithm_b.py) | US-001 / AC-001-7, US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures, US-007 / AC-007-2 partial, US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures |
+| Algorithm B Commit Workflow UnitTesting | [tests/UnitTesting/test_algorithm_b_us003.py](tests/UnitTesting/test_algorithm_b_us003.py) | US-003 / AC-003-1 through AC-003-6 covered for synthetic Algorithm B patch replay fixtures |
 | Algorithm C UnitTesting | [tests/UnitTesting/test_algorithm_c.py](tests/UnitTesting/test_algorithm_c.py) | US-006 / AC-006-4 parent/child clock-skew rejection for AlgC |
 | Diagnostics UnitTesting | [tests/UnitTesting/test_diagnostics.py](tests/UnitTesting/test_diagnostics.py) | US-010 / AC-010-7 programmatic logger configuration without CLI state leakage |
 | Protocol loader UnitTesting | [tests/UnitTesting/test_protocol_loader.py](tests/UnitTesting/test_protocol_loader.py) | JSONC loading regression; not yet mapped to a formal user-story AC |
 | CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7; US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures; US-007 / AC-007-2 partial; US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures and AC-009-6 partial |
+| CLI Commit Workflow SysTesting | [tests/SysTesting/test_cli_us003.py](tests/SysTesting/test_cli_us003.py) | US-003 / AC-003-5 and AC-003-6 covered for root CLI Algorithm B patch-history orphan handling |
 | CLI Validation SysTesting | [tests/SysTesting/test_cli_us006.py](tests/SysTesting/test_cli_us006.py) | US-006 / AC-006-1 partial empty-input coverage, AC-006-2, AC-006-3 fatal-reject policy, AC-006-4, AC-006-5; US-010 / AC-010-4, AC-010-5, and AC-010-6 partial structured ERROR coverage |
 | CLI Diagnostics SysTesting | [tests/SysTesting/test_cli_us010.py](tests/SysTesting/test_cli_us010.py) | US-010 / AC-010-1, AC-010-2, AC-010-3, and AC-010-6 covered for the synthetic Algorithm C CLI path |
 
 ### Recommended Next Coverage Slice
 
-1. US-003: add commit workflow coverage for merge, squash, cherry-pick, revert, amend, and rebase scenarios.
-2. US-004: add dedicated line-level ownership transfer tests for human edits, AI rewrites, whitespace, line endings, identical re-adds, and moved lines.
+1. US-004: add dedicated line-level ownership transfer tests for human edits, AI rewrites, whitespace, line endings, identical re-adds, and moved lines.
+2. US-003 hardening: add root CLI merge/squash/cherry-pick/revert fixtures plus broader AlgA/AlgC real-repository workflow coverage.
 3. US-010 hardening: add unreadable-file ERROR diagnostics, stdout metric-result behavior, and broader AlgA/AlgB process-detail logging.
 
 ---
