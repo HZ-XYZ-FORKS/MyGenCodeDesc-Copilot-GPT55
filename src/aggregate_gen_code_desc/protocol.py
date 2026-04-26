@@ -78,7 +78,11 @@ def load_gen_code_desc_dir(gen_code_desc_dir: Path, repo_url: str, repo_branch: 
     if not paths:
         raise ValueError(f"no genCodeDesc JSON files found in {gen_code_desc_dir}")
 
-    records = [load_json_file(path) for path in paths]
+    records = []
+    for path in paths:
+        record = load_json_file(path)
+        _validate_gen_ratios(record, path)
+        records.append(record)
     versions = {record.get("protocolVersion") for record in records}
     if len(versions) != 1:
         raise ValueError("mixed protocol versions are not supported")
@@ -101,6 +105,21 @@ def load_gen_code_desc_dir(gen_code_desc_dir: Path, repo_url: str, repo_branch: 
         seen_revision_ids.add(revision_id)
 
     return LoadedRecords(protocol_version=protocol_version, records=records)
+
+
+def _validate_gen_ratios(record: dict[str, Any], path: Path) -> None:
+    for file_detail in record.get("DETAIL", []):
+        file_name = file_detail.get("fileName", "<unknown>")
+        for collection_name in ("codeLines", "docLines"):
+            for entry in file_detail.get(collection_name, []):
+                if "genRatio" not in entry:
+                    continue
+                try:
+                    gen_ratio = int(entry["genRatio"])
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"genRatio must be 0-100 in {path}: {file_name}") from error
+                if gen_ratio < 0 or gen_ratio > 100:
+                    raise ValueError(f"genRatio must be 0-100 in {path}: {file_name}")
 
 
 def expand_entry_lines(entry: dict[str, Any]) -> list[int]:
