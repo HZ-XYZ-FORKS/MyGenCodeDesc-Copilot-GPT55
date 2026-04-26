@@ -789,7 +789,7 @@ Scenario: [Testability] Unit tests can set log level programmatically
 
 This section tracks **implemented and tested coverage in this fork**. It is intentionally separate from the appendix below, which describes what is applicable by VCS and algorithm in the BASE specification.
 
-Last verified: 2026-04-26 with `git diff --check && python3 -m pytest -v` (`36 passed`).
+Last verified: 2026-04-26 with `git diff --check && python3 -m pytest -v` (`39 passed`).
 
 | User Story | Current Status | Covered By | Remaining Gap |
 | ---------- | -------------- | ---------- | ------------- |
@@ -798,11 +798,11 @@ Last verified: 2026-04-26 with `git diff --check && python3 -m pytest -v` (`36 p
 | US-003 Commit-Level Conditions | Not covered by dedicated tests | None yet. | Merge, squash, cherry-pick, revert, amend, and rebase scenarios are not implemented as user-story tests. |
 | US-004 Line-Level Conditions | Partially exercised by AlgB replay tests | AlgB tests exercise modified lines, deleted lines, and new surviving lines as replay mechanics. | Dedicated AC-004 tests for ownership transfer, whitespace policy, line ending changes, identical re-adds, and moved lines are still missing. |
 | US-005 Branch and History Conditions | Partially covered | SysTesting covers the zero-denominator/no in-window-line behavior via AC-001-6. AlgB tests cover ordering mechanics that support history correctness. | Branch merges, long-lived branches, shallow clone behavior, and submodule/external handling remain untested. |
-| US-006 Destructive and Edge Conditions | Partially covered by CLI validation tests | SysTesting covers empty genCodeDesc input, mismatched repoURL, mismatched repoBranch, duplicate revision IDs, invalid genRatio, and missing Algorithm B patch directory as fatal CLI errors with no partial output. | True per-revision missing genCodeDesc chain handling, AlgC clock skew policy, corrupted JSON/schema validation breadth, and mandatory-argument misuse remain open. |
+| US-006 Destructive and Edge Conditions | Partially covered by CLI validation tests | SysTesting covers empty genCodeDesc input, mismatched repoURL, mismatched repoBranch, duplicate revision IDs, invalid genRatio, AlgC parent/child clock skew rejection, and missing Algorithm B patch directory as fatal CLI errors with no partial output. | True per-revision missing genCodeDesc chain handling beyond empty input, corrupted JSON/schema validation breadth, and mandatory-argument misuse remain open. |
 | US-007 Git vs SVN Differences | Partially covered | AlgB UnitTesting/SysTesting covers SVN numeric `revisionId` replay ordering and `repoBranch="trunk"` acceptance. | Git SHA format validation, SVN branch path normalization, SVN merge limitation reporting, and Git-only condition skipping remain untested. |
 | US-008 Scale and Performance | Not covered | None yet. | Performance, streaming, empty commit window, and I/O failure scenarios are not implemented. |
 | US-009 Algorithm-Specific Behavior | Partially covered for Algorithm B | AlgB tests cover add/delete/modify replay, multi-file/multi-hunk replay, pure rename, rename+modify, chained rename, final surviving snapshot, Git parent-before-child ordering, SVN numeric revision ordering, ordered patch artifact output, and missing patch directory diagnostics. | AlgA rename/cross-file/VCS-unreachable behavior and AlgC surviving-set/duplicate/mismatch behavior remain open. |
-| US-010 Diagnostics and Logging | Not covered | None yet. | `--logLevel`, structured logs, warning/error policy, and programmatic log configuration are not implemented. |
+| US-010 Diagnostics and Logging | Partially covered | CLI supports `--logLevel`; SysTesting covers structured ERROR logging for fatal clock skew and `--logLevel ERROR` suppression for successful runs. | INFO/DEBUG phase logs, WARN policy, structured logs for all phases, and programmatic log configuration remain open. |
 
 ### Traceability Detail
 
@@ -810,13 +810,14 @@ Last verified: 2026-04-26 with `git diff --check && python3 -m pytest -v` (`36 p
 | --------- | --------- | ------------------- |
 | Metric core UnitTesting | [tests/UnitTesting/test_metric_core.py](tests/UnitTesting/test_metric_core.py) | US-001 / AC-001-1 through AC-001-6 |
 | Algorithm B UnitTesting | [tests/UnitTesting/test_algorithm_b.py](tests/UnitTesting/test_algorithm_b.py) | US-001 / AC-001-7, US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures, US-007 / AC-007-2 partial, US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures |
+| Algorithm C UnitTesting | [tests/UnitTesting/test_algorithm_c.py](tests/UnitTesting/test_algorithm_c.py) | US-006 / AC-006-4 parent/child clock-skew rejection for AlgC |
 | Protocol loader UnitTesting | [tests/UnitTesting/test_protocol_loader.py](tests/UnitTesting/test_protocol_loader.py) | JSONC loading regression; not yet mapped to a formal user-story AC |
 | CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7; US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures; US-007 / AC-007-2 partial; US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures and AC-009-6 partial |
-| CLI Validation SysTesting | [tests/SysTesting/test_cli_us006.py](tests/SysTesting/test_cli_us006.py) | US-006 / AC-006-1 partial empty-input coverage, AC-006-2, AC-006-3 fatal-reject policy, AC-006-5 |
+| CLI Validation SysTesting | [tests/SysTesting/test_cli_us006.py](tests/SysTesting/test_cli_us006.py) | US-006 / AC-006-1 partial empty-input coverage, AC-006-2, AC-006-3 fatal-reject policy, AC-006-4, AC-006-5; US-010 / AC-010-4, AC-010-5, and AC-010-6 partial structured ERROR coverage |
 
 ### Recommended Next Coverage Slice
 
-1. US-006 / AC-006-4 plus US-010: define clock-skew and diagnostics/logging policy before deeper validation expansion.
+1. US-010 / AC-010-1, AC-010-2, AC-010-3, and AC-010-7: expand INFO/DEBUG/WARN phase logging and programmatic log configuration tests.
 2. US-003: add commit workflow coverage for merge, squash, cherry-pick, revert, amend, and rebase scenarios.
 3. US-004: add dedicated line-level ownership transfer tests for human edits, AI rewrites, whitespace, line endings, identical re-adds, and moved lines.
 

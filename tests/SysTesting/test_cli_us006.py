@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +19,18 @@ def _v2604_record(
     revision_id="rev1",
     revision_timestamp="2026-01-10T00:00:00Z",
     gen_ratio=100,
+    parent_revision_ids=None,
 ):
+    repository = {
+        "vcsType": "git",
+        "repoURL": repo_url,
+        "repoBranch": repo_branch,
+        "revisionId": revision_id,
+        "revisionTimestamp": revision_timestamp,
+    }
+    if parent_revision_ids is not None:
+        repository["parentRevisionIds"] = parent_revision_ids
+
     return {
         "protocolName": "generatedTextDesc",
         "protocolVersion": "26.04",
@@ -50,39 +62,37 @@ def _v2604_record(
                 ],
             }
         ],
-        "REPOSITORY": {
-            "vcsType": "git",
-            "repoURL": repo_url,
-            "repoBranch": repo_branch,
-            "revisionId": revision_id,
-            "revisionTimestamp": revision_timestamp,
-        },
+        "REPOSITORY": repository,
     }
 
 
-def _run_algorithm_c(gen_code_desc_dir, output_dir, repo_url="https://example.test/repo", repo_branch="main"):
+def _run_algorithm_c(gen_code_desc_dir, output_dir, repo_url="https://example.test/repo", repo_branch="main", extra_args=None):
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+    args = [
+        sys.executable,
+        str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+        "--repoUrl",
+        repo_url,
+        "--repoBranch",
+        repo_branch,
+        "--startTime",
+        "2026-01-01T00:00:00Z",
+        "--endTime",
+        "2026-01-31T00:00:00Z",
+        "--genCodeDescDir",
+        str(gen_code_desc_dir),
+        "--algorithm",
+        "C",
+        "--scope",
+        "A",
+        "--outputDir",
+        str(output_dir),
+    ]
+    if extra_args is not None:
+        args.extend(extra_args)
+
     return subprocess.run(
-        [
-            sys.executable,
-            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
-            "--repoUrl",
-            repo_url,
-            "--repoBranch",
-            repo_branch,
-            "--startTime",
-            "2026-01-01T00:00:00Z",
-            "--endTime",
-            "2026-01-31T00:00:00Z",
-            "--genCodeDescDir",
-            str(gen_code_desc_dir),
-            "--algorithm",
-            "C",
-            "--scope",
-            "A",
-            "--outputDir",
-            str(output_dir),
-        ],
+        args,
         check=False,
         env=env,
         text=True,
@@ -170,3 +180,44 @@ def test_aggregate_gen_code_desc_py_rejects_gen_ratio_outside_valid_range(tmp_pa
     assert "genRatio must be 0-100" in completed.stderr
     assert "src/auth.py" in completed.stderr
     _assert_no_partial_outputs(output_dir)
+
+
+# US-006 / AC-006-4, US-010 / AC-010-4, AC-010-6 / clock skew diagnostics / TC-SYS-018
+def test_aggregate_gen_code_desc_py_logs_error_and_rejects_algorithm_c_clock_skew(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    _write_record(gen_code_desc_dir / "parent.json", _v2604_record(revision_id="parent", revision_timestamp="2026-01-03T00:00:00Z"))
+    _write_record(
+        gen_code_desc_dir / "child.json",
+        _v2604_record(
+            revision_id="child",
+            revision_timestamp="2026-01-02T00:00:00Z",
+            parent_revision_ids=["parent"],
+        ),
+    )
+
+    completed = _run_algorithm_c(gen_code_desc_dir, output_dir, extra_args=["--logLevel", "ERROR"])
+
+    assert completed.returncode == 2
+    assert re.search(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \[ERROR\] \[CLI\] aggregateGenCodeDesc: clock skew detected",
+        completed.stderr,
+    )
+    assert "child" in completed.stderr
+    assert "parent" in completed.stderr
+    _assert_no_partial_outputs(output_dir)
+
+
+# US-010 / AC-010-5 / log-level filtering / TC-SYS-019
+def test_aggregate_gen_code_desc_py_log_level_error_suppresses_success_logs(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    _write_record(gen_code_desc_dir / "rev1.json", _v2604_record())
+
+    completed = _run_algorithm_c(gen_code_desc_dir, output_dir, extra_args=["--logLevel", "ERROR"])
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
+    assert (output_dir / "genCodeDescV26.03.json").exists()

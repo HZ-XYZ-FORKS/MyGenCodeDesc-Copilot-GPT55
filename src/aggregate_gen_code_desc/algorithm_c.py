@@ -32,6 +32,7 @@ def collect_algorithm_c_lines(
     loaded = load_gen_code_desc_dir(gen_code_desc_dir, repo_url, repo_branch)
     if loaded.protocol_version != "26.04":
         raise ValueError("Algorithm C requires protocolVersion 26.04 input")
+    _reject_clock_skew(loaded.records)
 
     start_dt = parse_utc_datetime(start_time)
     end_dt = parse_utc_datetime(end_time)
@@ -94,6 +95,34 @@ def collect_algorithm_c_lines(
         vcs_type=vcs_type,
         diagnostics={"missingRevisions": [], "duplicateRevisions": [], "clockSkewDetected": False, "warnings": []},
     )
+
+
+def _reject_clock_skew(records: list[dict[str, Any]]) -> None:
+    records_by_revision = {str(record["REPOSITORY"]["revisionId"]): record for record in records}
+    for record in records:
+        repository = record["REPOSITORY"]
+        revision_id = str(repository["revisionId"])
+        revision_timestamp = str(repository["revisionTimestamp"])
+        revision_dt = parse_utc_datetime(revision_timestamp)
+        for parent_revision_id in _parent_revision_ids(record):
+            parent_record = records_by_revision.get(parent_revision_id)
+            if parent_record is None:
+                continue
+            parent_timestamp = str(parent_record["REPOSITORY"]["revisionTimestamp"])
+            parent_dt = parse_utc_datetime(parent_timestamp)
+            if revision_dt < parent_dt:
+                raise ValueError(
+                    "clock skew detected: "
+                    f"revision {revision_id} revisionTimestamp {revision_timestamp} "
+                    f"is earlier than parent {parent_revision_id} revisionTimestamp {parent_timestamp}"
+                )
+
+
+def _parent_revision_ids(record: dict[str, Any]) -> list[str]:
+    parent_revision_ids = record.get("REPOSITORY", {}).get("parentRevisionIds", [])
+    if isinstance(parent_revision_ids, str):
+        return [parent_revision_ids]
+    return [str(parent_revision_id) for parent_revision_id in parent_revision_ids]
 
 
 def _collections_for_scope(scope: str) -> list[tuple[str, str]]:

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This test verifies the `aggregateGenCodeDesc` root CLI validation behavior for US-006 destructive and edge conditions. It checks that missing input records, mismatched repository identity, duplicate revision IDs, and invalid `genRatio` values fail explicitly before any aggregate output is written.
+This test verifies the `aggregateGenCodeDesc` root CLI validation behavior for US-006 destructive and edge conditions, plus the first US-010 diagnostics/logging contract. It checks that missing input records, mismatched repository identity, duplicate revision IDs, invalid `genRatio` values, and AlgC parent/child clock skew fail explicitly before any aggregate output is written.
 
 ## Status
 
@@ -13,7 +13,11 @@ Implemented / Passing
 - US-006 / AC-006-1: empty `genCodeDescDir` is reported as missing genCodeDesc input for the current CLI boundary.
 - US-006 / AC-006-2: mismatched `REPOSITORY.repoURL` and `REPOSITORY.repoBranch` are rejected with field-specific validation errors.
 - US-006 / AC-006-3: duplicate `REPOSITORY.revisionId` values are rejected.
+- US-006 / AC-006-4: Algorithm C rejects parent/child clock skew where a child revision timestamp is earlier than its parent timestamp.
 - US-006 / AC-006-5: `genRatio` values outside 0-100 are rejected and no partial data from the invalid record is used.
+- US-010 / AC-010-4: fatal clock-skew errors are logged to stderr.
+- US-010 / AC-010-5: `--logLevel ERROR` suppresses logs for successful runs.
+- US-010 / AC-010-6: fatal errors use a structured timestamp/level/component/message log format.
 - System behavior: top-level `aggregateGenCodeDesc.py` returns exit code 2 and does not write `genCodeDescV26.03.json` or `commitStart2EndTime.patch` on fatal validation errors.
 
 ## Manual

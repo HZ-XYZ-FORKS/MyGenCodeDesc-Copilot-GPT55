@@ -7,6 +7,7 @@ from pathlib import Path
 from aggregate_gen_code_desc.algorithm_a import collect_algorithm_a_lines
 from aggregate_gen_code_desc.algorithm_b import collect_algorithm_b_lines
 from aggregate_gen_code_desc.algorithm_c import collect_algorithm_c_lines
+from aggregate_gen_code_desc.diagnostics import emit_log
 from aggregate_gen_code_desc.metrics import calculate_metrics
 from aggregate_gen_code_desc.output import build_aggregate_record, write_outputs
 
@@ -24,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repoPath")
     parser.add_argument("--endRev", default="HEAD")
     parser.add_argument("--commitPatchDir")
+    parser.add_argument("--logLevel", choices=["DEBUG", "INFO", "WARN", "ERROR"], default="INFO")
     parser.add_argument("--outputDir", default=".")
     return parser
 
@@ -82,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         write_outputs(Path(args.outputDir), aggregate_record, patch_text=getattr(algorithm_result, "patch_text", ""))
     except Exception as error:
-        print(f"aggregateGenCodeDesc: {error}", file=sys.stderr)
+        emit_log(args.logLevel, "ERROR", "CLI", f"aggregateGenCodeDesc: {error}", stream=sys.stderr)
         return 2
 
     return 0
