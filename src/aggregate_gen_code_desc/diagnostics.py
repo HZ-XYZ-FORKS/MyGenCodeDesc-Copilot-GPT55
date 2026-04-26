@@ -8,6 +8,27 @@ from typing import TextIO
 LOG_LEVELS = {"DEBUG": 10, "INFO": 20, "WARN": 30, "ERROR": 40}
 
 
+class Logger:
+    def __init__(self, level: str, stream: TextIO = sys.stderr) -> None:
+        self.level = _normalize_level(level)
+        self.stream = stream
+
+    def emit(self, message_level: str, component: str, message: str) -> None:
+        emit_log(self.level, message_level, component, message, stream=self.stream)
+
+    def debug(self, component: str, message: str) -> None:
+        self.emit("DEBUG", component, message)
+
+    def info(self, component: str, message: str) -> None:
+        self.emit("INFO", component, message)
+
+    def warn(self, component: str, message: str) -> None:
+        self.emit("WARN", component, message)
+
+    def error(self, component: str, message: str) -> None:
+        self.emit("ERROR", component, message)
+
+
 def emit_log(
     configured_level: str,
     message_level: str,

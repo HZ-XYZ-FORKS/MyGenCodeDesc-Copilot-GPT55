@@ -74,7 +74,13 @@ def collect_algorithm_a_lines(
         lines=lines,
         input_protocol_version=loaded.protocol_version,
         vcs_type=vcs_type,
-        diagnostics={"missingRevisions": [], "duplicateRevisions": [], "clockSkewDetected": False, "warnings": []},
+        diagnostics={
+            "missingRevisions": [],
+            "duplicateRevisions": [],
+            "clockSkewDetected": False,
+            "warnings": loaded.warnings,
+            "recordsLoaded": loaded.record_summaries,
+        },
     )
 
 

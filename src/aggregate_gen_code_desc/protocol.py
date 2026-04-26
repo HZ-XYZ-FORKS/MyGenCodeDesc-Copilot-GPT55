@@ -11,6 +11,8 @@ from typing import Any
 class LoadedRecords:
     protocol_version: str
     records: list[dict[str, Any]]
+    warnings: list[str]
+    record_summaries: list[dict[str, Any]]
 
 
 def parse_utc_datetime(value: str) -> datetime:
@@ -104,7 +106,49 @@ def load_gen_code_desc_dir(gen_code_desc_dir: Path, repo_url: str, repo_branch: 
             raise ValueError(f"duplicate revisionId: {revision_id}")
         seen_revision_ids.add(revision_id)
 
-    return LoadedRecords(protocol_version=protocol_version, records=records)
+    return LoadedRecords(
+        protocol_version=protocol_version,
+        records=records,
+        warnings=_summary_detail_warnings(records),
+        record_summaries=[_record_summary(record) for record in records],
+    )
+
+
+def _summary_detail_warnings(records: list[dict[str, Any]]) -> list[str]:
+    warnings = []
+    for record in records:
+        repository = record.get("REPOSITORY", {})
+        revision_id = str(repository.get("revisionId", "<unknown>"))
+        summary = record.get("SUMMARY", {})
+        for summary_key, collection_name in (("totalCodeLines", "codeLines"), ("totalDocLines", "docLines")):
+            if summary_key not in summary:
+                continue
+            expected_count = int(summary[summary_key])
+            found_count = _record_entry_count(record, collection_name)
+            if expected_count != found_count:
+                warnings.append(
+                    f"revisionId={revision_id} SUMMARY.{summary_key} expected {expected_count} entries, found {found_count}"
+                )
+    return warnings
+
+
+def _record_summary(record: dict[str, Any]) -> dict[str, Any]:
+    repository = record.get("REPOSITORY", {})
+    return {
+        "revisionId": str(repository.get("revisionId", "<unknown>")),
+        "entries": _record_entry_count(record),
+    }
+
+
+def _record_entry_count(record: dict[str, Any], collection_name: str | None = None) -> int:
+    total = 0
+    for file_detail in record.get("DETAIL", []):
+        if collection_name is None:
+            total += len(file_detail.get("codeLines", []))
+            total += len(file_detail.get("docLines", []))
+        else:
+            total += len(file_detail.get(collection_name, []))
+    return total
 
 
 def _validate_gen_ratios(record: dict[str, Any], path: Path) -> None:

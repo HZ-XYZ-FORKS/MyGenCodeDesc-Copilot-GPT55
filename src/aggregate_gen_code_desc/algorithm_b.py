@@ -81,7 +81,13 @@ def collect_algorithm_b_lines(
         lines=lines,
         input_protocol_version=loaded.protocol_version,
         vcs_type=vcs_type,
-        diagnostics={"missingRevisions": [], "duplicateRevisions": [], "clockSkewDetected": False, "warnings": []},
+        diagnostics={
+            "missingRevisions": [],
+            "duplicateRevisions": [],
+            "clockSkewDetected": False,
+            "warnings": loaded.warnings,
+            "recordsLoaded": loaded.record_summaries,
+        },
         patch_text=_build_patch_artifact(
             repo_url=repo_url,
             repo_branch=repo_branch,
