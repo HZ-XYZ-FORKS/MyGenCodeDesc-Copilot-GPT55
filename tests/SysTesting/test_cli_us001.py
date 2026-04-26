@@ -202,6 +202,19 @@ def _write_add_only_patch(path, total_lines=10):
     path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
 
 
+def _write_add_only_patch_for_file(path, file_name, total_lines=3):
+    patch_lines = [
+        f"diff --git a/{file_name} b/{file_name}",
+        "new file mode 100644",
+        "index 0000000..1111111",
+        "--- /dev/null",
+        f"+++ b/{file_name}",
+        f"@@ -0,0 +1,{total_lines} @@",
+        *[f"+value_{line_number} = {line_number}" for line_number in range(1, total_lines + 1)],
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
 def _write_modify_delete_patch(path):
     patch_lines = [
         "diff --git a/src/auth.py b/src/auth.py",
@@ -229,6 +242,38 @@ def _write_single_line_modify_patch(path):
         "@@ -1,1 +1,1 @@",
         "-value_1 = 1",
         "+value_1 = 20",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
+def _write_pure_rename_patch(path):
+    _write_pure_rename_patch_for_paths(path, "src/auth.py", "src/account.py")
+
+
+def _write_pure_rename_patch_for_paths(path, old_file_name, new_file_name):
+    patch_lines = [
+        f"diff --git a/{old_file_name} b/{new_file_name}",
+        "similarity index 100%",
+        f"rename from {old_file_name}",
+        f"rename to {new_file_name}",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
+def _write_rename_modify_patch(path):
+    patch_lines = [
+        "diff --git a/src/auth.py b/src/account.py",
+        "similarity index 66%",
+        "rename from src/auth.py",
+        "rename to src/account.py",
+        "index 1111111..2222222 100644",
+        "--- a/src/auth.py",
+        "+++ b/src/account.py",
+        "@@ -1,3 +1,3 @@",
+        " value_1 = 1",
+        "-value_2 = 2",
+        "+value_2 = 20",
+        " value_3 = 3",
     ]
     path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
 
@@ -984,3 +1029,283 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_multifile_multihunk_patc
     assert "diff --git a/src/auth.py b/src/auth.py" in patch_text
     assert "diff --git a/src/helper.py b/src/helper.py" in patch_text
     assert "@@ -4,1 +4,2 @@" in patch_text
+
+
+# US-002 / AC-002-1, US-009 / AC-009-5 / Algorithm B pure rename / TC-SYS-010
+def test_aggregate_gen_code_desc_py_algorithm_b_replays_pure_rename(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+            ],
+            3,
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "rev2.json",
+        _v2603_multifile_record(
+            "https://example.test/repo",
+            "rev2",
+            "2026-01-11T00:00:00Z",
+            [],
+            3,
+        ),
+    )
+    _write_add_only_patch(commit_patch_dir / "rev1.patch", total_lines=3)
+    _write_pure_rename_patch(commit_patch_dir / "rev2.patch")
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--threshold",
+            "60",
+            "--commitPatchDir",
+            str(commit_patch_dir),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 3
+    assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.5333333333
+    assert aggregate["AGGREGATE"]["metrics"]["fullyAI"]["value"] == 0.3333333333
+    assert aggregate["AGGREGATE"]["metrics"]["mostlyAI"]["value"] == 0.6666666667
+    assert aggregate["DETAIL"] == [
+        {
+            "fileName": "src/account.py",
+            "codeLines": [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+            ],
+        }
+    ]
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert "rename from src/auth.py" in patch_text
+    assert "rename to src/account.py" in patch_text
+
+
+# US-002 / AC-002-2, US-009 / AC-009-5 / Algorithm B rename plus modify / TC-SYS-011
+def test_aggregate_gen_code_desc_py_algorithm_b_replays_rename_plus_modify(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_record_with_detail(
+            "https://example.test/repo",
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+            ],
+            3,
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "rev2.json",
+        _v2603_multifile_record(
+            "https://example.test/repo",
+            "rev2",
+            "2026-01-11T00:00:00Z",
+            [
+                {
+                    "fileName": "src/account.py",
+                    "codeLines": [
+                        {"lineLocation": 2, "genRatio": 40, "genMethod": "vibeCoding"},
+                    ],
+                }
+            ],
+            3,
+        ),
+    )
+    _write_add_only_patch(commit_patch_dir / "rev1.patch", total_lines=3)
+    _write_rename_modify_patch(commit_patch_dir / "rev2.patch")
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--threshold",
+            "60",
+            "--commitPatchDir",
+            str(commit_patch_dir),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 3
+    assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.4666666667
+    assert aggregate["AGGREGATE"]["metrics"]["fullyAI"]["value"] == 0.3333333333
+    assert aggregate["AGGREGATE"]["metrics"]["mostlyAI"]["value"] == 0.3333333333
+    assert aggregate["DETAIL"] == [
+        {
+            "fileName": "src/account.py",
+            "codeLines": [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 40, "genMethod": "vibeCoding"},
+            ],
+        }
+    ]
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert "rename from src/auth.py" in patch_text
+    assert "rename to src/account.py" in patch_text
+    assert "+value_2 = 20" in patch_text
+
+
+# US-009 / AC-009-5 / Algorithm B chained renames / TC-SYS-012
+def test_aggregate_gen_code_desc_py_algorithm_b_replays_chained_renames(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_multifile_record(
+            "https://example.test/repo",
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {
+                    "fileName": "src/v1.py",
+                    "codeLines": [
+                        {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                        {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+                    ],
+                }
+            ],
+            3,
+        ),
+    )
+    for revision_id, revision_timestamp in [
+        ("rev2", "2026-01-11T00:00:00Z"),
+        ("rev3", "2026-01-12T00:00:00Z"),
+    ]:
+        _write_record(
+            gen_code_desc_dir / f"{revision_id}.json",
+            _v2603_multifile_record(
+                "https://example.test/repo",
+                revision_id,
+                revision_timestamp,
+                [],
+                3,
+            ),
+        )
+    _write_add_only_patch_for_file(commit_patch_dir / "rev1.patch", "src/v1.py", total_lines=3)
+    _write_pure_rename_patch_for_paths(commit_patch_dir / "rev2.patch", "src/v1.py", "src/v2.py")
+    _write_pure_rename_patch_for_paths(commit_patch_dir / "rev3.patch", "src/v2.py", "src/v3.py")
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--threshold",
+            "60",
+            "--commitPatchDir",
+            str(commit_patch_dir),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 3
+    assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.5333333333
+    assert aggregate["AGGREGATE"]["metrics"]["fullyAI"]["value"] == 0.3333333333
+    assert aggregate["AGGREGATE"]["metrics"]["mostlyAI"]["value"] == 0.6666666667
+    assert aggregate["DETAIL"] == [
+        {
+            "fileName": "src/v3.py",
+            "codeLines": [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+            ],
+        }
+    ]
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert patch_text.index("# --- commit rev2 ---") < patch_text.index("# --- commit rev3 ---")
+    assert "rename from src/v1.py" in patch_text
+    assert "rename to src/v3.py" in patch_text

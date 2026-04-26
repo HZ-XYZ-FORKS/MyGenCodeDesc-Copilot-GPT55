@@ -23,6 +23,19 @@ def _write_add_only_patch(path, total_lines=10):
     path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
 
 
+def _write_add_only_patch_for_file(path, file_name, total_lines=3):
+    patch_lines = [
+        f"diff --git a/{file_name} b/{file_name}",
+        "new file mode 100644",
+        "index 0000000..1111111",
+        "--- /dev/null",
+        f"+++ b/{file_name}",
+        f"@@ -0,0 +1,{total_lines} @@",
+        *[f"+value_{line_number} = {line_number}" for line_number in range(1, total_lines + 1)],
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
 def _write_modify_delete_patch(path):
     patch_lines = [
         "diff --git a/src/auth.py b/src/auth.py",
@@ -50,6 +63,38 @@ def _write_single_line_modify_patch(path):
         "@@ -1,1 +1,1 @@",
         "-value_1 = 1",
         "+value_1 = 20",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
+def _write_pure_rename_patch(path):
+    _write_pure_rename_patch_for_paths(path, "src/auth.py", "src/account.py")
+
+
+def _write_pure_rename_patch_for_paths(path, old_file_name, new_file_name):
+    patch_lines = [
+        f"diff --git a/{old_file_name} b/{new_file_name}",
+        "similarity index 100%",
+        f"rename from {old_file_name}",
+        f"rename to {new_file_name}",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
+def _write_rename_modify_patch(path):
+    patch_lines = [
+        "diff --git a/src/auth.py b/src/account.py",
+        "similarity index 66%",
+        "rename from src/auth.py",
+        "rename to src/account.py",
+        "index 1111111..2222222 100644",
+        "--- a/src/auth.py",
+        "+++ b/src/account.py",
+        "@@ -1,3 +1,3 @@",
+        " value_1 = 1",
+        "-value_2 = 2",
+        "+value_2 = 20",
+        " value_3 = 3",
     ]
     path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
 
@@ -492,3 +537,176 @@ def test_algorithm_b_replays_every_file_section_and_hunk_in_a_patch(tmp_path):
     assert metrics.fully_ai.value == pytest.approx(0.25)
     assert metrics.mostly_ai.value == pytest.approx(0.625)
     assert "diff --git a/src/helper.py b/src/helper.py" in result.patch_text
+
+
+# US-002 / AC-002-1, US-009 / AC-009-5 / Algorithm B pure rename / TC-UNIT-013
+def test_algorithm_b_replays_pure_rename_without_double_counting_lines(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_record_for_revision(
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+            ],
+            3,
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "rev2.json",
+        _v2603_multi_file_record_for_revision(
+            "rev2",
+            "2026-01-11T00:00:00Z",
+            [],
+            3,
+        ),
+    )
+    _write_add_only_patch(commit_patch_dir / "rev1.patch", total_lines=3)
+    _write_pure_rename_patch(commit_patch_dir / "rev2.patch")
+
+    result = collect_algorithm_b_lines(
+        gen_code_desc_dir=gen_code_desc_dir,
+        repo_url="https://example.test/repo",
+        repo_branch="main",
+        commit_patch_dir=commit_patch_dir,
+        start_time="2026-01-01T00:00:00Z",
+        end_time="2026-01-31T00:00:00Z",
+        scope="A",
+    )
+    metrics = calculate_metrics(result.lines, threshold=60)
+
+    assert [(line.file_name, line.line_number, line.gen_ratio, line.gen_method) for line in result.lines] == [
+        ("src/account.py", 1, 100, "codeCompletion"),
+        ("src/account.py", 2, 60, "vibeCoding"),
+        ("src/account.py", 3, 0, "Manual"),
+    ]
+    assert metrics.total_lines == 3
+    assert metrics.weighted.value == pytest.approx(0.5333333333)
+    assert metrics.fully_ai.value == pytest.approx(0.3333333333)
+    assert metrics.mostly_ai.value == pytest.approx(0.6666666667)
+
+
+# US-002 / AC-002-2, US-009 / AC-009-5 / Algorithm B rename plus modify / TC-UNIT-014
+def test_algorithm_b_replays_rename_plus_modify_with_changed_line_from_rename_commit(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_record_for_revision(
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+            ],
+            3,
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "rev2.json",
+        _v2603_multi_file_record_for_revision(
+            "rev2",
+            "2026-01-11T00:00:00Z",
+            [
+                {
+                    "fileName": "src/account.py",
+                    "codeLines": [
+                        {"lineLocation": 2, "genRatio": 40, "genMethod": "vibeCoding"},
+                    ],
+                }
+            ],
+            3,
+        ),
+    )
+    _write_add_only_patch(commit_patch_dir / "rev1.patch", total_lines=3)
+    _write_rename_modify_patch(commit_patch_dir / "rev2.patch")
+
+    result = collect_algorithm_b_lines(
+        gen_code_desc_dir=gen_code_desc_dir,
+        repo_url="https://example.test/repo",
+        repo_branch="main",
+        commit_patch_dir=commit_patch_dir,
+        start_time="2026-01-01T00:00:00Z",
+        end_time="2026-01-31T00:00:00Z",
+        scope="A",
+    )
+    metrics = calculate_metrics(result.lines, threshold=60)
+
+    assert [(line.file_name, line.line_number, line.gen_ratio, line.gen_method) for line in result.lines] == [
+        ("src/account.py", 1, 100, "codeCompletion"),
+        ("src/account.py", 2, 40, "vibeCoding"),
+        ("src/account.py", 3, 0, "Manual"),
+    ]
+    assert metrics.total_lines == 3
+    assert metrics.weighted.value == pytest.approx(0.4666666667)
+    assert metrics.fully_ai.value == pytest.approx(0.3333333333)
+    assert metrics.mostly_ai.value == pytest.approx(0.3333333333)
+
+
+# US-009 / AC-009-5 / Algorithm B chained renames / TC-UNIT-015
+def test_algorithm_b_tracks_unchanged_lines_through_chained_renames(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_multi_file_record_for_revision(
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {
+                    "fileName": "src/v1.py",
+                    "codeLines": [
+                        {"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"},
+                        {"lineLocation": 2, "genRatio": 60, "genMethod": "vibeCoding"},
+                    ],
+                }
+            ],
+            3,
+        ),
+    )
+    for revision_id, revision_timestamp in [
+        ("rev2", "2026-01-11T00:00:00Z"),
+        ("rev3", "2026-01-12T00:00:00Z"),
+    ]:
+        _write_record(
+            gen_code_desc_dir / f"{revision_id}.json",
+            _v2603_multi_file_record_for_revision(
+                revision_id,
+                revision_timestamp,
+                [],
+                3,
+            ),
+        )
+    _write_add_only_patch_for_file(commit_patch_dir / "rev1.patch", "src/v1.py", total_lines=3)
+    _write_pure_rename_patch_for_paths(commit_patch_dir / "rev2.patch", "src/v1.py", "src/v2.py")
+    _write_pure_rename_patch_for_paths(commit_patch_dir / "rev3.patch", "src/v2.py", "src/v3.py")
+
+    result = collect_algorithm_b_lines(
+        gen_code_desc_dir=gen_code_desc_dir,
+        repo_url="https://example.test/repo",
+        repo_branch="main",
+        commit_patch_dir=commit_patch_dir,
+        start_time="2026-01-01T00:00:00Z",
+        end_time="2026-01-31T00:00:00Z",
+        scope="A",
+    )
+    metrics = calculate_metrics(result.lines, threshold=60)
+
+    assert [(line.file_name, line.line_number, line.gen_ratio, line.gen_method) for line in result.lines] == [
+        ("src/v3.py", 1, 100, "codeCompletion"),
+        ("src/v3.py", 2, 60, "vibeCoding"),
+        ("src/v3.py", 3, 0, "Manual"),
+    ]
+    assert metrics.total_lines == 3
+    assert metrics.weighted.value == pytest.approx(0.5333333333)
+    assert metrics.fully_ai.value == pytest.approx(0.3333333333)
+    assert metrics.mostly_ai.value == pytest.approx(0.6666666667)

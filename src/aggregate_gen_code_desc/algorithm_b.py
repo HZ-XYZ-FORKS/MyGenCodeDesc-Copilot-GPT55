@@ -260,6 +260,12 @@ def _parse_file_patches(patch_path: Path) -> list[FilePatch]:
         if raw_line.startswith("+++ "):
             current_file_patch.new_path = _normalize_patch_path(raw_line.removeprefix("+++ "))
             continue
+        if raw_line.startswith("rename from "):
+            current_file_patch.old_path = _normalize_patch_path(raw_line.removeprefix("rename from "))
+            continue
+        if raw_line.startswith("rename to "):
+            current_file_patch.new_path = _normalize_patch_path(raw_line.removeprefix("rename to "))
+            continue
 
         hunk_match = HUNK_HEADER.match(raw_line)
         if hunk_match:
