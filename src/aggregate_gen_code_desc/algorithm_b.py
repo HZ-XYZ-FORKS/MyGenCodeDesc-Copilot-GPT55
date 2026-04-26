@@ -96,6 +96,7 @@ def collect_algorithm_b_lines(
             "clockSkewDetected": False,
             "warnings": warnings,
             "orphanedRevisions": orphaned_revision_ids,
+            "lineOwnershipPolicy": _line_ownership_policy(),
             "recordsLoaded": [summary for summary in loaded.record_summaries if summary["revisionId"] in replay_revision_ids],
         },
         patch_text=_build_patch_artifact(
@@ -124,6 +125,16 @@ def _records_in_patch_history(records: list[dict[str, Any]], commit_patch_dir: P
         else:
             orphaned_revision_ids.append(revision_id)
     return replay_records, sorted(orphaned_revision_ids)
+
+
+def _line_ownership_policy() -> dict[str, str]:
+    return {
+        "modifiedLines": "delete/add patch hunks transfer ownership to the commit that adds the current line form",
+        "whitespaceOnlyChanges": "whitespace-only delete/add patch hunks transfer ownership; Algorithm B does not ignore whitespace",
+        "lineEndingChanges": "file-wide line-ending replacement patches transfer ownership for each replaced line",
+        "identicalReadd": "deleted and re-added identical content receives attribution from the re-add commit",
+        "movedLines": "moved lines represented as delete/add patch hunks receive attribution from the move commit",
+    }
 
 
 @dataclass(frozen=True)
