@@ -97,6 +97,7 @@ def collect_algorithm_b_lines(
             "warnings": warnings,
             "orphanedRevisions": orphaned_revision_ids,
             "lineOwnershipPolicy": _line_ownership_policy(),
+            "historyPolicy": _history_policy(),
             "recordsLoaded": [summary for summary in loaded.record_summaries if summary["revisionId"] in replay_revision_ids],
         },
         patch_text=_build_patch_artifact(
@@ -134,6 +135,16 @@ def _line_ownership_policy() -> dict[str, str]:
         "lineEndingChanges": "file-wide line-ending replacement patches transfer ownership for each replaced line",
         "identicalReadd": "deleted and re-added identical content receives attribution from the re-add commit",
         "movedLines": "moved lines represented as delete/add patch hunks receive attribution from the move commit",
+    }
+
+
+def _history_policy() -> dict[str, str]:
+    return {
+        "timeWindow": "surviving lines are included only when their origin revision timestamp is within startTime and endTime",
+        "multipleMerges": "Algorithm B replays to a single final snapshot, so each live path/line position contributes at most once",
+        "longLivedBranches": "parentRevisionIds order replay before timestamp filtering so old base origins can be excluded while in-window branch origins remain",
+        "shallowHistory": "shallow or incomplete patch history limits Algorithm B accuracy; provide complete commitPatchDir history for authoritative replay",
+        "submodules": "git submodule gitlink patches contain no parent-repo lines; run an independent aggregateGenCodeDesc run for each submodule repository",
     }
 
 
