@@ -113,7 +113,10 @@ def _reject_clock_skew(records: list[dict[str, Any]]) -> None:
         for parent_revision_id in _parent_revision_ids(record):
             parent_record = records_by_revision.get(parent_revision_id)
             if parent_record is None:
-                continue
+                raise ValueError(
+                    "genCodeDesc chain break: "
+                    f"revision {revision_id} references missing parent revision {parent_revision_id}"
+                )
             parent_timestamp = str(parent_record["REPOSITORY"]["revisionTimestamp"])
             parent_dt = parse_utc_datetime(parent_timestamp)
             if revision_dt < parent_dt:

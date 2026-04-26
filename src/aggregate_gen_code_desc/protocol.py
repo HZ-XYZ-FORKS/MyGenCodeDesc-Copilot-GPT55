@@ -24,7 +24,10 @@ def parse_utc_datetime(value: str) -> datetime:
 def load_json_file(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     text = strip_jsonc_comments(text)
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"invalid JSON in {path.name}: {error.msg} at line {error.lineno} column {error.colno}") from error
 
 
 def strip_jsonc_comments(text: str) -> str:

@@ -77,3 +77,26 @@ def test_algorithm_c_rejects_child_revision_timestamp_earlier_than_parent(tmp_pa
 
     assert "child" in str(error.value)
     assert "parent" in str(error.value)
+
+
+# US-006 / AC-006-1 / Algorithm C missing parent chain break / TC-UNIT-038
+def test_algorithm_c_rejects_missing_parent_revision_as_chain_break(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    gen_code_desc_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "child.json",
+        _v2604_record("child", "2026-01-02T00:00:00Z", parent_revision_ids=["missing-parent"]),
+    )
+
+    with pytest.raises(ValueError, match="genCodeDesc chain break") as error:
+        collect_algorithm_c_lines(
+            gen_code_desc_dir=gen_code_desc_dir,
+            repo_url="https://example.test/repo",
+            repo_branch="main",
+            start_time="2026-01-01T00:00:00Z",
+            end_time="2026-01-31T00:00:00Z",
+            scope="A",
+        )
+
+    assert "child" in str(error.value)
+    assert "missing-parent" in str(error.value)

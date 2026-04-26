@@ -38,8 +38,8 @@ def collect_algorithm_b_lines(
     if loaded.protocol_version != "26.03":
         raise ValueError("Algorithm B requires protocolVersion 26.03 input")
 
-    replay_records, orphaned_revision_ids = _records_in_patch_history(loaded.records, commit_patch_dir)
-    if not replay_records:
+    replay_records, orphaned_revision_ids, missing_revision_ids = _records_in_patch_history(loaded.records, commit_patch_dir)
+    if not replay_records and not missing_revision_ids:
         raise ValueError("no genCodeDesc records match commitPatchDir patch history")
 
     start_dt = parse_utc_datetime(start_time)
@@ -71,6 +71,19 @@ def collect_algorithm_b_lines(
         if start_dt <= revision_dt <= end_dt:
             patch_sections.append((revision_id, patch_path.read_text(encoding="utf-8")))
 
+    for revision_id in missing_revision_ids:
+        revision_timestamp = start_time
+        patch_path = commit_patch_dir / f"{revision_id}.patch"
+        attribution_indexes[revision_id] = {}
+        revision_timestamps[revision_id] = revision_timestamp
+        snapshot = _replay_patch(
+            snapshot=snapshot,
+            patch_path=patch_path,
+            revision_id=revision_id,
+            revision_timestamp=revision_timestamp,
+        )
+        patch_sections.append((revision_id, patch_path.read_text(encoding="utf-8")))
+
     lines = _collect_surviving_lines(
         snapshot=snapshot,
         attribution_indexes=attribution_indexes,
@@ -83,15 +96,18 @@ def collect_algorithm_b_lines(
     warnings = list(loaded.warnings)
     if orphaned_revision_ids:
         warnings.append(f"ignored orphaned genCodeDesc revisions absent from patch history: {', '.join(orphaned_revision_ids)}")
+    if missing_revision_ids:
+        warnings.append(f"missing genCodeDesc records for patch revisions replayed as Manual: {', '.join(missing_revision_ids)}")
 
-    vcs_type = replay_records[-1].get("REPOSITORY", {}).get("vcsType", "git")
+    vcs_source_record = replay_records[-1] if replay_records else loaded.records[-1]
+    vcs_type = vcs_source_record.get("REPOSITORY", {}).get("vcsType", "git")
     replay_revision_ids = {str(record["REPOSITORY"]["revisionId"]) for record in replay_records}
     return AlgorithmBResult(
         lines=lines,
         input_protocol_version=loaded.protocol_version,
         vcs_type=vcs_type,
         diagnostics={
-            "missingRevisions": [],
+            "missingRevisions": missing_revision_ids,
             "duplicateRevisions": [],
             "clockSkewDetected": False,
             "warnings": warnings,
@@ -111,21 +127,29 @@ def collect_algorithm_b_lines(
     )
 
 
-def _records_in_patch_history(records: list[dict[str, Any]], commit_patch_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
-    patch_revision_ids = {
-        path.name.removesuffix(".patch")
-        for path in commit_patch_dir.glob("*.patch")
-        if path.is_file() and path.name.endswith(".patch")
-    }
+def _records_in_patch_history(records: list[dict[str, Any]], commit_patch_dir: Path) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    patch_revision_ids = _patch_revision_ids(commit_patch_dir)
+    patch_revision_id_set = set(patch_revision_ids)
     replay_records = []
     orphaned_revision_ids = []
+    record_revision_ids = set()
     for record in records:
         revision_id = str(record["REPOSITORY"]["revisionId"])
-        if revision_id in patch_revision_ids:
+        record_revision_ids.add(revision_id)
+        if revision_id in patch_revision_id_set:
             replay_records.append(record)
         else:
             orphaned_revision_ids.append(revision_id)
-    return replay_records, sorted(orphaned_revision_ids)
+    missing_revision_ids = [revision_id for revision_id in patch_revision_ids if revision_id not in record_revision_ids]
+    return replay_records, sorted(orphaned_revision_ids), missing_revision_ids
+
+
+def _patch_revision_ids(commit_patch_dir: Path) -> list[str]:
+    return sorted(
+        path.name.removesuffix(".patch")
+        for path in commit_patch_dir.glob("*.patch")
+        if path.is_file() and path.name.endswith(".patch")
+    )
 
 
 def _line_ownership_policy() -> dict[str, str]:
@@ -144,6 +168,7 @@ def _history_policy() -> dict[str, str]:
         "multipleMerges": "Algorithm B replays to a single final snapshot, so each live path/line position contributes at most once",
         "longLivedBranches": "parentRevisionIds order replay before timestamp filtering so old base origins can be excluded while in-window branch origins remain",
         "shallowHistory": "shallow or incomplete patch history limits Algorithm B accuracy; provide complete commitPatchDir history for authoritative replay",
+        "missingGenCodeDesc": "patch revisions without genCodeDesc are replayed with Manual attribution and listed in missingRevisions",
         "submodules": "git submodule gitlink patches contain no parent-repo lines; run an independent aggregateGenCodeDesc run for each submodule repository",
     }
 

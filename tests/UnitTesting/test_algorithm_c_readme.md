@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This test verifies package-level Algorithm C validation for clock-skew-sensitive replay ordering. It focuses on rejecting a child revision whose `revisionTimestamp` is earlier than its parent revision, because Algorithm C uses timestamps to order embedded-blame records.
+This test verifies package-level Algorithm C validation for destructive and ordering-sensitive replay conditions. It focuses on rejecting a child revision whose `revisionTimestamp` is earlier than its parent revision, and on rejecting parent chains that reference a missing genCodeDesc record.
 
 ## Status
 
@@ -11,6 +11,7 @@ Implemented / Passing
 ## Covered
 
 - US-006 / AC-006-4: Algorithm C detects non-monotonic parent/child timestamps and rejects the input as clock skew.
+- US-006 / AC-006-1: Algorithm C reports a missing parent genCodeDesc record as a chain break error.
 - Algorithm C package API: `collect_algorithm_c_lines()`.
 - v26.04 `REPOSITORY.parentRevisionIds` ordering validation.
 
