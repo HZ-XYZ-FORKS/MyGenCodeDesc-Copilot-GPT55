@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from aggregate_gen_code_desc.diagnostics import scale_policy
 from aggregate_gen_code_desc.metrics import GenerationLine
 from aggregate_gen_code_desc.protocol import (
     expand_entry_lines,
@@ -98,6 +99,7 @@ def collect_algorithm_c_lines(
             "duplicateRevisions": [],
             "clockSkewDetected": False,
             "warnings": loaded.warnings,
+            "scalePolicy": scale_policy(),
             "recordsLoaded": loaded.record_summaries,
         },
     )

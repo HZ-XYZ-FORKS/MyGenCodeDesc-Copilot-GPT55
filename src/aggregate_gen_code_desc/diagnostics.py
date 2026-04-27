@@ -48,6 +48,15 @@ def format_log(level: str, component: str, message: str) -> str:
     return f"{timestamp} [{_normalize_level(level)}] [{component}] {message}"
 
 
+def scale_policy() -> dict[str, str]:
+    return {
+        "algorithmAReferenceScale": "Algorithm A reference-scale runs prioritize correctness over speed with sequential file/blame processing; peak memory below 1 GB is a target documented by this fork, not a synthetic-test benchmark",
+        "algorithmCReferenceScale": "Algorithm C 200 GB reference-scale streaming is a documented open limitation in this fork; current processing loads records before timestamp-order accumulation and reports that limitation explicitly",
+        "emptyWindow": "A window with 0 commits returns totalLines=0 and 0.0% for all metric modes without error",
+        "ioFailure": "genCodeDesc read failures abort before output is written and report the file path plus revisionId=<unknown> when metadata cannot be read",
+    }
+
+
 def _normalize_level(level: str) -> str:
     normalized = level.upper()
     if normalized not in LOG_LEVELS:

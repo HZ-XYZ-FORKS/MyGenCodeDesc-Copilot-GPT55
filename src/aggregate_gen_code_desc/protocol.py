@@ -22,7 +22,10 @@ def parse_utc_datetime(value: str) -> datetime:
 
 
 def load_json_file(path: Path) -> dict[str, Any]:
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ValueError(f"unable to read genCodeDesc file {path}: revisionId=<unknown>: {error}") from error
     text = strip_jsonc_comments(text)
     try:
         return json.loads(text)

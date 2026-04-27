@@ -789,7 +789,7 @@ Scenario: [Testability] Unit tests can set log level programmatically
 
 This section tracks **implemented and tested coverage in this fork**. It is intentionally separate from the appendix below, which describes what is applicable by VCS and algorithm in the BASE specification.
 
-Last verified: 2026-04-27 with `git diff --check && python3 -m pytest -v` (`74 passed`).
+Last verified: 2026-04-27 with `git diff --check && python3 -m pytest -v` (`77 passed`).
 
 | User Story | Current Status | Covered By | Remaining Gap |
 | ---------- | -------------- | ---------- | ------------- |
@@ -800,7 +800,7 @@ Last verified: 2026-04-27 with `git diff --check && python3 -m pytest -v` (`74 p
 | US-005 Branch and History Conditions | Covered for current Algorithm B synthetic fixtures | Algorithm B UnitTesting covers outside-window origin exclusion, multi-merge uniqueness, long-lived branch origin filtering, shallow-history limitation policy, and submodule gitlink exclusion policy. Root CLI SysTesting covers multi-merge uniqueness and submodule policy through `aggregateGenCodeDesc.py --algorithm B`. | Broader real-repository coverage for AlgA/AlgC, true shallow clone behavior, and VCS-provider-specific submodule/external workflows remain open. |
 | US-006 Destructive and Edge Conditions | Covered for current validation hardening slice | SysTesting covers empty genCodeDesc input, Algorithm B patch revisions missing genCodeDesc replayed as Manual/genRatio 0, Algorithm C missing parent chain-break rejection, mismatched repoURL/repoBranch, duplicate revision IDs, invalid genRatio, corrupted JSON with file context, lower-camel mandatory CLI flag enforcement, AlgC parent/child clock skew rejection, and missing Algorithm B patch directory as fatal CLI errors with no partial output. | Dedicated AlgA live-repository missing-record coverage, broader schema-required-field/type validation, and duplicate-warning-vs-fatal policy logging remain open. |
 | US-007 Git vs SVN Differences | Covered for current Algorithm B synthetic fixtures | Algorithm B UnitTesting and root CLI SysTesting cover Git SHA-1/SHA-256 revision ID acceptance, SVN numeric revision replay ordering, SVN branch path normalization, SVN merge-blame limitation reporting, and SVN skipping Git-only rebase/amend assumptions. | Broader real-repository AlgA/AlgC coverage, strict rejection of malformed Git/SVN revision IDs across all paths, and true SVN blame integration remain open. |
-| US-008 Scale and Performance | Not covered | None yet. | Performance, streaming, empty commit window, and I/O failure scenarios are not implemented. |
+| US-008 Scale and Performance | Covered for current synthetic scale-policy slice | Algorithm C UnitTesting and root CLI SysTesting cover empty-window zero metrics, documented reference-scale runtime/memory policy, explicit Algorithm C 200 GB streaming limitation, and genCodeDesc read-failure aborts with file context and no partial output. | Full 1K-commit/200 GB benchmark execution, true streaming implementation for AlgC, and measured memory ceilings remain open. |
 | US-009 Algorithm-Specific Behavior | Partially covered for Algorithm B | AlgB tests cover add/delete/modify replay, multi-file/multi-hunk replay, pure rename, rename+modify, chained rename, final surviving snapshot, Git parent-before-child ordering, SVN numeric revision ordering, ordered patch artifact output, and missing patch directory diagnostics. | AlgA rename/cross-file/VCS-unreachable behavior and AlgC surviving-set/duplicate/mismatch behavior remain open. |
 | US-010 Diagnostics and Logging | Partially covered | CLI supports `--logLevel`; SysTesting covers default INFO LOAD/PROCESS/SUMMARY logs, DEBUG algorithm/file/line detail, WARN continuation for SUMMARY/DETAIL mismatch, structured ERROR logging for fatal clock skew, and `--logLevel ERROR` suppression for successful runs. UnitTesting covers isolated programmatic logger configuration. | Broader AlgA/AlgB process detail, unreadable-file ERROR diagnostics with revision context, stdout metric-result contract, and additional WARN policy scenarios remain open. |
 
@@ -816,6 +816,7 @@ Last verified: 2026-04-27 with `git diff --check && python3 -m pytest -v` (`74 p
 | Algorithm B Destructive UnitTesting | [tests/UnitTesting/test_algorithm_b_us006.py](tests/UnitTesting/test_algorithm_b_us006.py) | US-006 / AC-006-1 missing genCodeDesc patch revisions replayed as Manual/genRatio 0 for synthetic Algorithm B fixtures |
 | Algorithm B Git/SVN UnitTesting | [tests/UnitTesting/test_algorithm_b_us007.py](tests/UnitTesting/test_algorithm_b_us007.py) | US-007 / AC-007-1 through AC-007-5 covered for synthetic Algorithm B patch replay fixtures |
 | Algorithm C UnitTesting | [tests/UnitTesting/test_algorithm_c.py](tests/UnitTesting/test_algorithm_c.py) | US-006 / AC-006-1 missing parent chain-break rejection and AC-006-4 parent/child clock-skew rejection for AlgC |
+| Algorithm C Scale UnitTesting | [tests/UnitTesting/test_algorithm_c_us008.py](tests/UnitTesting/test_algorithm_c_us008.py) | US-008 / AC-008-1 through AC-008-3 covered for synthetic Algorithm C empty-window and scale-policy diagnostics |
 | Diagnostics UnitTesting | [tests/UnitTesting/test_diagnostics.py](tests/UnitTesting/test_diagnostics.py) | US-010 / AC-010-7 programmatic logger configuration without CLI state leakage |
 | Protocol loader UnitTesting | [tests/UnitTesting/test_protocol_loader.py](tests/UnitTesting/test_protocol_loader.py) | JSONC loading regression; not yet mapped to a formal user-story AC |
 | CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7; US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures; US-007 / AC-007-2 partial; US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures and AC-009-6 partial |
@@ -824,13 +825,14 @@ Last verified: 2026-04-27 with `git diff --check && python3 -m pytest -v` (`74 p
 | CLI Branch/History SysTesting | [tests/SysTesting/test_cli_us005.py](tests/SysTesting/test_cli_us005.py) | US-005 / AC-005-2 and AC-005-5 covered for root CLI Algorithm B output and diagnostics policy |
 | CLI Validation SysTesting | [tests/SysTesting/test_cli_us006.py](tests/SysTesting/test_cli_us006.py) | US-006 / AC-006-1 Algorithm B missing-record manual replay and Algorithm C missing-chain rejection, AC-006-2, AC-006-3 fatal-reject policy, AC-006-4, AC-006-5, AC-006-6, corrupted JSON rejection with file context; US-010 / AC-010-4, AC-010-5, and AC-010-6 partial structured ERROR coverage |
 | CLI Git/SVN SysTesting | [tests/SysTesting/test_cli_us007.py](tests/SysTesting/test_cli_us007.py) | US-007 / AC-007-1 through AC-007-5 covered for root CLI Algorithm B output, warnings, and diagnostics policy |
+| CLI Scale SysTesting | [tests/SysTesting/test_cli_us008.py](tests/SysTesting/test_cli_us008.py) | US-008 / AC-008-1 through AC-008-4 covered for root CLI Algorithm C empty-window output, scale diagnostics, and I/O failure abort behavior |
 | CLI Diagnostics SysTesting | [tests/SysTesting/test_cli_us010.py](tests/SysTesting/test_cli_us010.py) | US-010 / AC-010-1, AC-010-2, AC-010-3, and AC-010-6 covered for the synthetic Algorithm C CLI path |
 
 ### Recommended Next Coverage Slice
 
-1. US-008: add scale/performance coverage for empty commit windows, documented runtime/memory policy, and I/O failure handling.
+1. US-009 hardening: add AlgA rename/cross-file/VCS-unreachable behavior and AlgC surviving-set/duplicate/mismatch coverage.
 2. US-006 follow-up: add dedicated AlgA live-repository missing-record coverage and broader schema-required-field/type validation.
-3. US-010 hardening: add unreadable-file ERROR diagnostics, stdout metric-result behavior, and broader AlgA/AlgB process-detail logging.
+3. US-010 hardening: add stdout metric-result behavior and broader AlgA/AlgB process-detail logging.
 
 ---
 

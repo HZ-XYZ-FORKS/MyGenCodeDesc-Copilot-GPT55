@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from aggregate_gen_code_desc.algorithm_a import CODE_EXTENSIONS, DOC_EXTENSIONS
+from aggregate_gen_code_desc.diagnostics import scale_policy
 from aggregate_gen_code_desc.metrics import GenerationLine
 from aggregate_gen_code_desc.protocol import expand_entry_lines, load_gen_code_desc_dir, parse_utc_datetime
 
@@ -119,6 +120,7 @@ def collect_algorithm_b_lines(
             "lineOwnershipPolicy": _line_ownership_policy(),
             "historyPolicy": _history_policy(),
             "vcsPolicy": vcs_policy,
+            "scalePolicy": scale_policy(),
             "recordsLoaded": [summary for summary in loaded.record_summaries if summary["revisionId"] in replay_revision_ids],
         },
         patch_text=_build_patch_artifact(
