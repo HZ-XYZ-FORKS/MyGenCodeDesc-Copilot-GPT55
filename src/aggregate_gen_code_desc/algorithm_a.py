@@ -52,23 +52,26 @@ def collect_algorithm_a_lines(
     attribution_index = _build_v2603_attribution_index(loaded.records, scope)
     lines: list[GenerationLine] = []
 
-    for file_path, line_kind in _list_scoped_files(repo_path, end_rev, scope):
-        for blame_line in _git_blame_lines(repo_path, end_rev, file_path):
-            if not start_dt <= blame_line.timestamp <= end_dt:
-                continue
-            gen_ratio, gen_method = attribution_index.get(
-                (blame_line.revision_id, blame_line.original_file_path, line_kind, blame_line.original_line),
-                (0, "Manual"),
-            )
-            lines.append(
-                GenerationLine(
-                    gen_ratio=gen_ratio,
-                    gen_method=gen_method,
-                    file_name=blame_line.current_file_path,
-                    line_number=blame_line.current_line,
-                    line_kind=line_kind,
+    try:
+        for file_path, line_kind in _list_scoped_files(repo_path, end_rev, scope):
+            for blame_line in _git_blame_lines(repo_path, end_rev, file_path):
+                if not start_dt <= blame_line.timestamp <= end_dt:
+                    continue
+                gen_ratio, gen_method = attribution_index.get(
+                    (blame_line.revision_id, blame_line.original_file_path, line_kind, blame_line.original_line),
+                    (0, "Manual"),
                 )
-            )
+                lines.append(
+                    GenerationLine(
+                        gen_ratio=gen_ratio,
+                        gen_method=gen_method,
+                        file_name=blame_line.current_file_path,
+                        line_number=blame_line.current_line,
+                        line_kind=line_kind,
+                    )
+                )
+    except RuntimeError as error:
+        raise ValueError(_format_vcs_access_failure(repo_url, error)) from error
 
     vcs_type = loaded.records[-1].get("REPOSITORY", {}).get("vcsType", "git")
     return AlgorithmAResult(
@@ -81,9 +84,18 @@ def collect_algorithm_a_lines(
             "clockSkewDetected": False,
             "warnings": loaded.warnings,
             "scalePolicy": scale_policy(),
+            "algorithmAPolicy": algorithm_a_policy(),
             "recordsLoaded": loaded.record_summaries,
         },
     )
+
+
+def algorithm_a_policy() -> dict[str, str]:
+    return {
+        "renameDetection": "Algorithm A invokes git blame with -M so intra-file moved or renamed content can retain original attribution when Git can detect it",
+        "copyMoveDetection": "Algorithm A invokes git blame with -C -C so cross-file moved or copied code can retain original attribution; this improves correctness but increases blame runtime on large histories",
+        "vcsFailure": "Algorithm A requires local VCS access and aborts before output when Git commands fail; retry after VCS recovery or use Algorithm C when embedded blame is available",
+    }
 
 
 def _build_v2603_attribution_index(
@@ -115,7 +127,7 @@ def _list_scoped_files(repo_path: Path, end_rev: str, scope: str) -> list[tuple[
 
 
 def _git_blame_lines(repo_path: Path, end_rev: str, file_path: str) -> list[BlameLine]:
-    output = _run_git(repo_path, "blame", "--line-porcelain", end_rev, "--", file_path)
+    output = _run_git(repo_path, "blame", "-M", "-C", "-C", "--line-porcelain", end_rev, "--", file_path)
     lines: list[BlameLine] = []
     revision_id = ""
     original_file_path = file_path
@@ -156,16 +168,27 @@ def _git_blame_lines(repo_path: Path, end_rev: str, file_path: str) -> list[Blam
 
 
 def _run_git(repo_path: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=repo_path,
-        check=False,
-        text=True,
-        capture_output=True,
-    )
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=repo_path,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+    except OSError as error:
+        raise RuntimeError(str(error)) from error
     if completed.returncode != 0:
-        raise RuntimeError(completed.stderr.strip())
+        message = completed.stderr.strip() or completed.stdout.strip() or f"git {' '.join(args)} exited {completed.returncode}"
+        raise RuntimeError(message)
     return completed.stdout.strip()
+
+
+def _format_vcs_access_failure(repo_url: str, error: RuntimeError) -> str:
+    return (
+        f"Algorithm A VCS access failed for {repo_url}: {error}. "
+        "retry after the VCS connection or local repository is available, or use Algorithm C when embedded blame is available."
+    )
 
 
 def _collections_for_scope(scope: str) -> list[tuple[str, str]]:

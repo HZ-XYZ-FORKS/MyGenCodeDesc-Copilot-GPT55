@@ -38,6 +38,9 @@ def collect_algorithm_c_lines(
     start_dt = parse_utc_datetime(start_time)
     end_dt = parse_utc_datetime(end_time)
     surviving_lines: dict[tuple[str, str, int, str], GenerationLine] = {}
+    current_positions: dict[tuple[str, str, int], tuple[str, str, int, str]] = {}
+    duplicate_add_entries: list[str] = []
+    warnings = list(loaded.warnings)
     sorted_records = sorted(
         loaded.records,
         key=lambda record: parse_utc_datetime(record["REPOSITORY"]["revisionTimestamp"]),
@@ -61,10 +64,14 @@ def collect_algorithm_c_lines(
 
         for entry, line_kind in delete_entries:
             blame = entry["blame"]
-            original_lines = expand_original_lines(blame, 1)
+            line_numbers = expand_entry_lines(entry)
+            original_lines = expand_original_lines(blame, len(line_numbers) if line_numbers else 1)
             for original_line in original_lines:
                 key = (blame["revisionId"], blame["originalFilePath"], original_line, line_kind)
                 surviving_lines.pop(key, None)
+                for current_position, origin_key in list(current_positions.items()):
+                    if origin_key == key:
+                        current_positions.pop(current_position, None)
 
         for entry, line_kind, file_name in add_entries:
             line_numbers = expand_entry_lines(entry)
@@ -72,6 +79,17 @@ def collect_algorithm_c_lines(
             original_lines = expand_original_lines(blame, len(line_numbers))
             for line_number, original_line in zip(line_numbers, original_lines, strict=True):
                 key = (blame["revisionId"], blame["originalFilePath"], original_line, line_kind)
+                current_position = (file_name, line_kind, line_number)
+                previous_key = current_positions.get(current_position)
+                if previous_key is not None:
+                    surviving_lines.pop(previous_key, None)
+                    duplicate_summary = f"{file_name}:{line_kind}:{line_number} overwritten by revision {record['REPOSITORY']['revisionId']}"
+                    duplicate_add_entries.append(duplicate_summary)
+                    warnings.append(
+                        f"revisionId={record['REPOSITORY']['revisionId']} duplicate add entry for "
+                        f"{file_name}:{line_kind}:{line_number}; overwriting previous surviving line"
+                    )
+                current_positions[current_position] = key
                 surviving_lines[key] = GenerationLine(
                     gen_ratio=int(entry["genRatio"]),
                     gen_method=str(entry["genMethod"]),
@@ -97,8 +115,9 @@ def collect_algorithm_c_lines(
         diagnostics={
             "missingRevisions": [],
             "duplicateRevisions": [],
+            "duplicateAddEntries": duplicate_add_entries,
             "clockSkewDetected": False,
-            "warnings": loaded.warnings,
+            "warnings": warnings,
             "scalePolicy": scale_policy(),
             "recordsLoaded": loaded.record_summaries,
         },
