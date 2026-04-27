@@ -100,7 +100,7 @@ def load_gen_code_desc_dir(gen_code_desc_dir: Path, repo_url: str, repo_branch: 
         repository = record.get("REPOSITORY", {})
         if repository.get("repoURL") != repo_url:
             raise ValueError("REPOSITORY.repoURL does not match requested repoUrl")
-        if repository.get("repoBranch") != repo_branch:
+        if not _repo_branch_matches(repository, repo_branch):
             raise ValueError("REPOSITORY.repoBranch does not match requested repoBranch")
         revision_id = repository.get("revisionId")
         if not revision_id:
@@ -115,6 +115,19 @@ def load_gen_code_desc_dir(gen_code_desc_dir: Path, repo_url: str, repo_branch: 
         warnings=_summary_detail_warnings(records),
         record_summaries=[_record_summary(record) for record in records],
     )
+
+
+def _repo_branch_matches(repository: dict[str, Any], requested_repo_branch: str) -> bool:
+    record_repo_branch = repository.get("repoBranch")
+    if record_repo_branch == requested_repo_branch:
+        return True
+    if str(repository.get("vcsType", "git")).lower() == "svn":
+        return _normalize_svn_branch_path(str(record_repo_branch)) == _normalize_svn_branch_path(requested_repo_branch)
+    return False
+
+
+def _normalize_svn_branch_path(repo_branch: str) -> str:
+    return repo_branch.strip("/")
 
 
 def _summary_detail_warnings(records: list[dict[str, Any]]) -> list[str]:

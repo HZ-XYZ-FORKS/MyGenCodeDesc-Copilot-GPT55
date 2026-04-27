@@ -93,14 +93,18 @@ def collect_algorithm_b_lines(
         scope=scope,
     )
 
+    vcs_source_record = replay_records[-1] if replay_records else loaded.records[-1]
+    vcs_type = vcs_source_record.get("REPOSITORY", {}).get("vcsType", "git")
+    vcs_policy = _vcs_policy(str(vcs_type))
+
     warnings = list(loaded.warnings)
     if orphaned_revision_ids:
         warnings.append(f"ignored orphaned genCodeDesc revisions absent from patch history: {', '.join(orphaned_revision_ids)}")
     if missing_revision_ids:
         warnings.append(f"missing genCodeDesc records for patch revisions replayed as Manual: {', '.join(missing_revision_ids)}")
+    if str(vcs_type).lower() == "svn":
+        warnings.append(vcs_policy["svnMergeBlame"])
 
-    vcs_source_record = replay_records[-1] if replay_records else loaded.records[-1]
-    vcs_type = vcs_source_record.get("REPOSITORY", {}).get("vcsType", "git")
     replay_revision_ids = {str(record["REPOSITORY"]["revisionId"]) for record in replay_records}
     return AlgorithmBResult(
         lines=lines,
@@ -114,6 +118,7 @@ def collect_algorithm_b_lines(
             "orphanedRevisions": orphaned_revision_ids,
             "lineOwnershipPolicy": _line_ownership_policy(),
             "historyPolicy": _history_policy(),
+            "vcsPolicy": vcs_policy,
             "recordsLoaded": [summary for summary in loaded.record_summaries if summary["revisionId"] in replay_revision_ids],
         },
         patch_text=_build_patch_artifact(
@@ -171,6 +176,20 @@ def _history_policy() -> dict[str, str]:
         "missingGenCodeDesc": "patch revisions without genCodeDesc are replayed with Manual attribution and listed in missingRevisions",
         "submodules": "git submodule gitlink patches contain no parent-repo lines; run an independent aggregateGenCodeDesc run for each submodule repository",
     }
+
+
+def _vcs_policy(vcs_type: str) -> dict[str, str]:
+    policy = {
+        "gitRevisionIdFormat": "Git revisionId accepts 40-character SHA-1 and 64-character SHA-256 hex strings; synthetic fixtures may use shorter IDs for tests",
+        "svnRevisionIdFormat": "SVN revisionId accepts positive integer revision numbers and optional r/R prefixes",
+        "svnMergeBlame": "SVN blame may attribute merged lines to imprecise revisions after svn merge; treat this as a known limitation",
+        "gitOnlyHistoryRewrites": "Git rebase/amend orphan checks are skipped for SVN because SVN history is immutable",
+        "svnBranchPath": "SVN repoBranch paths are normalized by leading and trailing slash differences for comparison",
+    }
+    if vcs_type.lower() == "svn":
+        policy["svnBranchPath"] = "SVN repoBranch paths are normalized so /branches/name and branches/name compare as the same branch path"
+        policy["gitOnlyHistoryRewrites"] = "Git rebase/amend conditions are skipped for SVN because SVN history is immutable"
+    return policy
 
 
 @dataclass(frozen=True)
