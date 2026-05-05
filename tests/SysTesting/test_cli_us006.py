@@ -13,6 +13,40 @@ def _write_record(path, record):
     path.write_text(json.dumps(record, indent=2), encoding="utf-8")
 
 
+def _run_git(repo_path, *args, env=None):
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=repo_path,
+        env=env,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return completed.stdout.strip()
+
+
+def _commit_all(repo_path, message, timestamp):
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_DATE": timestamp,
+        "GIT_COMMITTER_DATE": timestamp,
+    }
+    _run_git(repo_path, "add", ".")
+    _run_git(
+        repo_path,
+        "-c",
+        "user.name=SysTesting",
+        "-c",
+        "user.email=sys@example.test",
+        "commit",
+        "-m",
+        message,
+        env=env,
+    )
+    return _run_git(repo_path, "rev-parse", "HEAD")
+
+
 def _v2604_record(
     repo_url="https://example.test/repo",
     repo_branch="main",
@@ -66,7 +100,7 @@ def _v2604_record(
     }
 
 
-def _v2603_record(revision_id="c1", revision_timestamp="2026-01-10T00:00:00Z"):
+def _v2603_record(revision_id="c1", revision_timestamp="2026-01-10T00:00:00Z", repo_url="https://example.test/repo"):
     return {
         "protocolName": "generatedTextDesc",
         "protocolVersion": "26.03",
@@ -87,7 +121,7 @@ def _v2603_record(revision_id="c1", revision_timestamp="2026-01-10T00:00:00Z"):
         ],
         "REPOSITORY": {
             "vcsType": "git",
-            "repoURL": "https://example.test/repo",
+            "repoURL": repo_url,
             "repoBranch": "main",
             "revisionId": revision_id,
             "revisionTimestamp": revision_timestamp,
@@ -195,6 +229,40 @@ def _run_algorithm_b(gen_code_desc_dir, commit_patch_dir, output_dir):
     )
 
 
+def _run_algorithm_a(gen_code_desc_dir, repo_path, end_rev, output_dir):
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+    return subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            str(repo_path),
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "A",
+            "--scope",
+            "A",
+            "--repoPath",
+            str(repo_path),
+            "--endRev",
+            end_rev,
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+
 def _run_root_cli(args, output_dir):
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
     return subprocess.run(
@@ -230,6 +298,39 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_missing_gen_code_desc_pa
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.5
     assert aggregate["AGGREGATE"]["diagnostics"]["missingRevisions"] == ["c5"]
+
+
+# US-006 / AC-006-1 / missing per-revision genCodeDesc for Algorithm A / TC-SYS-037
+def test_aggregate_gen_code_desc_py_algorithm_a_marks_missing_live_blame_revision_as_manual(tmp_path):
+    repo_path = tmp_path / "repo"
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    repo_path.mkdir()
+    gen_code_desc_dir.mkdir()
+    _run_git(repo_path, "init")
+    _run_git(repo_path, "checkout", "-b", "main")
+    source_dir = repo_path / "src"
+    source_dir.mkdir()
+    (source_dir / "main.py").write_text("known = True\n", encoding="utf-8")
+    known_revision = _commit_all(repo_path, "known record", "2026-01-10T00:00:00+0000")
+    (source_dir / "main.py").write_text("known = True\nmissing_record_line = True\n", encoding="utf-8")
+    missing_revision = _commit_all(repo_path, "missing record", "2026-01-12T00:00:00+0000")
+    _write_record(
+        gen_code_desc_dir / "known.json",
+        _v2603_record(revision_id=known_revision, repo_url=str(repo_path)),
+    )
+
+    completed = _run_algorithm_a(gen_code_desc_dir, repo_path, missing_revision, output_dir)
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 2
+    assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.5
+    assert aggregate["AGGREGATE"]["diagnostics"]["missingRevisions"] == [missing_revision]
+    assert aggregate["DETAIL"] == [
+        {"fileName": "src/main.py", "codeLines": [{"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"}]}
+    ]
 
 
 # US-006 / AC-006-1 / missing genCodeDesc input / TC-SYS-013
@@ -321,6 +422,38 @@ def test_aggregate_gen_code_desc_py_rejects_corrupted_json_with_file_context(tmp
     assert completed.returncode == 2
     assert "invalid JSON" in completed.stderr
     assert "broken.json" in completed.stderr
+    _assert_no_partial_outputs(output_dir)
+
+
+# US-006 / schema required-field validation / TC-SYS-038
+def test_aggregate_gen_code_desc_py_rejects_missing_required_summary_with_no_partial_output(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    record = _v2604_record()
+    record.pop("SUMMARY")
+    _write_record(gen_code_desc_dir / "rev1.json", record)
+
+    completed = _run_algorithm_c(gen_code_desc_dir, output_dir)
+
+    assert completed.returncode == 2
+    assert "SUMMARY is required" in completed.stderr
+    _assert_no_partial_outputs(output_dir)
+
+
+# US-006 / schema type validation / TC-SYS-039
+def test_aggregate_gen_code_desc_py_rejects_invalid_summary_count_type_with_no_partial_output(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    record = _v2604_record()
+    record["SUMMARY"]["totalCodeLines"] = "one"
+    _write_record(gen_code_desc_dir / "rev1.json", record)
+
+    completed = _run_algorithm_c(gen_code_desc_dir, output_dir)
+
+    assert completed.returncode == 2
+    assert "SUMMARY.totalCodeLines must be an integer" in completed.stderr
     _assert_no_partial_outputs(output_dir)
 
 

@@ -50,6 +50,8 @@ def collect_algorithm_a_lines(
     start_dt = parse_utc_datetime(start_time)
     end_dt = parse_utc_datetime(end_time)
     attribution_index = _build_v2603_attribution_index(loaded.records, scope)
+    loaded_revision_ids = {str(record["REPOSITORY"]["revisionId"]) for record in loaded.records}
+    missing_revision_ids: set[str] = set()
     lines: list[GenerationLine] = []
 
     try:
@@ -57,6 +59,8 @@ def collect_algorithm_a_lines(
             for blame_line in _git_blame_lines(repo_path, end_rev, file_path):
                 if not start_dt <= blame_line.timestamp <= end_dt:
                     continue
+                if blame_line.revision_id not in loaded_revision_ids:
+                    missing_revision_ids.add(blame_line.revision_id)
                 gen_ratio, gen_method = attribution_index.get(
                     (blame_line.revision_id, blame_line.original_file_path, line_kind, blame_line.original_line),
                     (0, "Manual"),
@@ -79,7 +83,7 @@ def collect_algorithm_a_lines(
         input_protocol_version=loaded.protocol_version,
         vcs_type=vcs_type,
         diagnostics={
-            "missingRevisions": [],
+            "missingRevisions": sorted(missing_revision_ids),
             "duplicateRevisions": [],
             "clockSkewDetected": False,
             "warnings": loaded.warnings,
