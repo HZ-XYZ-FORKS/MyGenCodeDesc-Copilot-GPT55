@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -88,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         _emit_process_logs(logger, args.algorithm, algorithm_result.lines, algorithm_result.diagnostics)
         write_outputs(Path(args.outputDir), aggregate_record, patch_text=getattr(algorithm_result, "patch_text", ""))
         _emit_summary_logs(logger, algorithm_result.lines, metrics, args.threshold)
+        print(json.dumps(_build_stdout_metric_result(metrics, args.threshold), sort_keys=True))
     except Exception as error:
         logger.error("CLI", f"aggregateGenCodeDesc: {error}")
         return 2
@@ -118,6 +120,8 @@ def _emit_process_logs(logger: Logger, algorithm: str, lines: list[GenerationLin
                 "PROCESS",
                 f"file={file_name} line={line.line_number} genRatio={line.gen_ratio} method={line.gen_method}",
             )
+    for process_detail in diagnostics.get("processDetails", []):
+        logger.debug("PROCESS", process_detail)
 
 
 def _emit_summary_logs(logger: Logger, lines: list[GenerationLine], metrics: AggregateMetrics, threshold: int) -> None:
@@ -142,6 +146,19 @@ def _format_metrics(metrics: AggregateMetrics) -> str:
         f"fullyAI={metrics.fully_ai.value * 100:.1f}% "
         f"mostlyAI={metrics.mostly_ai.value * 100:.1f}%"
     )
+
+
+def _build_stdout_metric_result(metrics: AggregateMetrics, threshold: int) -> dict[str, object]:
+    return {
+        "totalLines": metrics.total_lines,
+        "weighted": {"value": metrics.weighted.value, "numerator": metrics.weighted.numerator},
+        "fullyAI": {"value": metrics.fully_ai.value, "numerator": metrics.fully_ai.numerator},
+        "mostlyAI": {
+            "value": metrics.mostly_ai.value,
+            "numerator": metrics.mostly_ai.numerator,
+            "threshold": threshold,
+        },
+    }
 
 
 if __name__ == "__main__":

@@ -53,6 +53,7 @@ def collect_algorithm_a_lines(
     loaded_revision_ids = {str(record["REPOSITORY"]["revisionId"]) for record in loaded.records}
     missing_revision_ids: set[str] = set()
     lines: list[GenerationLine] = []
+    process_details: list[str] = []
 
     try:
         for file_path, line_kind in _list_scoped_files(repo_path, end_rev, scope):
@@ -64,6 +65,13 @@ def collect_algorithm_a_lines(
                 gen_ratio, gen_method = attribution_index.get(
                     (blame_line.revision_id, blame_line.original_file_path, line_kind, blame_line.original_line),
                     (0, "Manual"),
+                )
+                process_details.append(
+                    "algorithm=A "
+                    f"file={blame_line.current_file_path} line={blame_line.current_line} "
+                    f"state=BLAME origin={blame_line.revision_id} "
+                    f"original={blame_line.original_file_path}:{blame_line.original_line} "
+                    f"genRatio={gen_ratio} method={gen_method}"
                 )
                 lines.append(
                     GenerationLine(
@@ -89,6 +97,7 @@ def collect_algorithm_a_lines(
             "warnings": loaded.warnings,
             "scalePolicy": scale_policy(),
             "algorithmAPolicy": algorithm_a_policy(),
+            "processDetails": process_details,
             "recordsLoaded": loaded.record_summaries,
         },
     )

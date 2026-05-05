@@ -85,7 +85,7 @@ def collect_algorithm_b_lines(
         )
         patch_sections.append((revision_id, patch_path.read_text(encoding="utf-8")))
 
-    lines = _collect_surviving_lines(
+    lines, process_details = _collect_surviving_lines(
         snapshot=snapshot,
         attribution_indexes=attribution_indexes,
         revision_timestamps=revision_timestamps,
@@ -121,6 +121,7 @@ def collect_algorithm_b_lines(
             "historyPolicy": _history_policy(),
             "vcsPolicy": vcs_policy,
             "scalePolicy": scale_policy(),
+            "processDetails": process_details,
             "recordsLoaded": [summary for summary in loaded.record_summaries if summary["revisionId"] in replay_revision_ids],
         },
         patch_text=_build_patch_artifact(
@@ -490,10 +491,11 @@ def _collect_surviving_lines(
     start_time: str,
     end_time: str,
     scope: str,
-) -> list[GenerationLine]:
+) -> tuple[list[GenerationLine], list[str]]:
     start_dt = parse_utc_datetime(start_time)
     end_dt = parse_utc_datetime(end_time)
     lines: list[GenerationLine] = []
+    process_details: list[str] = []
 
     for file_name in sorted(snapshot):
         line_kind = _line_kind_for_scope(file_name, scope)
@@ -513,6 +515,13 @@ def _collect_surviving_lines(
                 (origin.origin_file_name, line_kind, origin.origin_line_number),
                 (0, "Manual"),
             )
+            process_details.append(
+                "algorithm=B "
+                f"file={file_name} line={line_number} state=REPLAYED "
+                f"origin={origin.origin_revision_id} "
+                f"original={origin.origin_file_name}:{origin.origin_line_number} "
+                f"genRatio={gen_ratio} method={gen_method}"
+            )
             lines.append(
                 GenerationLine(
                     gen_ratio=gen_ratio,
@@ -523,7 +532,7 @@ def _collect_surviving_lines(
                 )
             )
 
-    return lines
+    return lines, process_details
 
 
 def _build_patch_artifact(
