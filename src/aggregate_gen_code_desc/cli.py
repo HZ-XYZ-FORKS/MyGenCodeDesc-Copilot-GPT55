@@ -162,7 +162,7 @@ def _is_git_working_copy(path: Path) -> bool:
 
 def _clone_git_repo(repo_url: str, repo_branch: str, clone_path: Path) -> None:
     completed = subprocess.run(
-        ["git", "clone", "--branch", repo_branch, "--", repo_url, str(clone_path)],
+        ["git", "clone", "--single-branch", "--branch", repo_branch, "--", repo_url, str(clone_path)],
         check=False,
         text=True,
         capture_output=True,
