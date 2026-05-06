@@ -273,6 +273,34 @@ def _write_delete_file_patch(path, file_name="src/auth.py", total_lines=3):
     path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
 
 
+def _write_window_diff_add_patch(path):
+    patch_lines = [
+        "diff --git a/src/window.py b/src/window.py",
+        "index 1111111..2222222 100644",
+        "--- a/src/window.py",
+        "+++ b/src/window.py",
+        "@@ -1,1 +1,3 @@",
+        " legacy = True",
+        "+window_alive = True",
+        "+deleted_later = True",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
+def _write_window_diff_delete_patch(path):
+    patch_lines = [
+        "diff --git a/src/window.py b/src/window.py",
+        "index 2222222..3333333 100644",
+        "--- a/src/window.py",
+        "+++ b/src/window.py",
+        "@@ -1,3 +1,2 @@",
+        " legacy = True",
+        " window_alive = True",
+        "-deleted_later = True",
+    ]
+    path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
+
+
 def _write_pure_copy_patch(path, old_file_name="src/auth.py", new_file_name="src/auth_copy.py"):
     patch_lines = [
         f"diff --git a/{old_file_name} b/{new_file_name}",
@@ -729,6 +757,94 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_multiple_patches_to_fina
     assert patch_text.index("# --- commit rev1 ---") < patch_text.index("# --- commit rev2 ---")
     assert "-value_2 = 2" in patch_text
     assert "+value_2 = 20" in patch_text
+
+
+# US-001 / AC-001-8 / Algorithm B alive subset of window diff / TC-SYS-046
+def test_aggregate_gen_code_desc_py_algorithm_b_counts_only_alive_subset_of_window_diff(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "rev1.json",
+        _v2603_multifile_record(
+            "https://example.test/repo",
+            "rev1",
+            "2026-01-10T00:00:00Z",
+            [
+                {
+                    "fileName": "src/window.py",
+                    "codeLines": [
+                        {"lineLocation": 2, "genRatio": 100, "genMethod": "codeCompletion"},
+                        {"lineLocation": 3, "genRatio": 80, "genMethod": "vibeCoding"},
+                    ],
+                }
+            ],
+            3,
+        ),
+    )
+    _write_record(
+        gen_code_desc_dir / "rev2.json",
+        _v2603_multifile_record(
+            "https://example.test/repo",
+            "rev2",
+            "2026-01-11T00:00:00Z",
+            [{"fileName": "src/window.py", "codeLines": []}],
+            0,
+        ),
+    )
+    _write_window_diff_add_patch(commit_patch_dir / "rev1.patch")
+    _write_window_diff_delete_patch(commit_patch_dir / "rev2.patch")
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+            "--repoUrl",
+            "https://example.test/repo",
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "B",
+            "--scope",
+            "A",
+            "--threshold",
+            "60",
+            "--commitPatchDir",
+            str(commit_patch_dir),
+            "--outputDir",
+            str(output_dir),
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["totalCodeLines"] == 1
+    assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 0
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 1.0
+    assert aggregate["DETAIL"] == [
+        {
+            "fileName": "src/window.py",
+            "codeLines": [{"lineLocation": 2, "genRatio": 100, "genMethod": "codeCompletion"}],
+        }
+    ]
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert "+window_alive = True" in patch_text
+    assert "+deleted_later = True" in patch_text
+    assert "-deleted_later = True" in patch_text
 
 
 # US-001, US-009 / Algorithm B diagnostics / TC-SYS-006

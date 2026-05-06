@@ -118,7 +118,7 @@ def test_aggregate_gen_code_desc_py_rejects_mid_stream_io_failure_with_context_a
 
     completed = _run_algorithm_c(gen_code_desc_dir, output_dir)
 
-    assert completed.returncode == 2
+    assert completed.returncode == 1
     assert "unable to read genCodeDesc file" in completed.stderr
     assert "500-unreadable.json" in completed.stderr
     assert "revisionId=500-unreadable" in completed.stderr

@@ -125,7 +125,7 @@ def test_aggregate_gen_code_desc_py_algorithm_a_reports_vcs_access_failure_and_w
         output_dir,
     )
 
-    assert completed.returncode == 2
+    assert completed.returncode == 1
     assert "Algorithm A VCS access failed for https://example.test/repo" in completed.stderr
     assert "retry" in completed.stderr
     assert "Algorithm C" in completed.stderr

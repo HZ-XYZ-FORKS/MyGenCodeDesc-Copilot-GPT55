@@ -17,6 +17,53 @@ Format follows the [create-user-story](/.github/skills/create-user-story/SKILL.m
 
 ---
 
+## US-000: Safe Agent Sandbox for All Forks
+
+AS A codebase maintainer or tool developer,
+I WANT every fork to use a reproducible, isolated container environment for all code agent work,
+SO THAT experiments, builds, and agent actions cannot pollute or damage the host system, and all contributors have a consistent, safe setup.
+
+### AC-000-1: [Typical] Fork initializes with Dev Container
+
+```gherkin
+Scenario: [Typical] Fork initializes with Dev Container
+  GIVEN a developer forks MyGenCodeDescBase
+  WHEN they open the fork in VS Code with Docker Desktop running
+  THEN VS Code offers to reopen in a Dev Container
+  AND the container builds successfully
+```
+
+### AC-000-2: [Typical] All agent/code work happens inside container
+
+```gherkin
+Scenario: [Typical] All agent/code work happens inside container
+  GIVEN the fork is open in the Dev Container
+  WHEN a code agent generates code, runs tests, or installs dependencies
+  THEN all actions are isolated to the container
+  AND the host system is not modified outside the workspace mount
+```
+
+### AC-000-3: [Safety] Non-root user and no host secrets
+
+```gherkin
+Scenario: [Safety] Container avoids privileged host access by default
+  GIVEN the container is running
+  THEN the default user is non-root
+  AND host secrets are not mounted by default
+  AND the Docker socket is not mounted by default
+```
+
+### AC-000-4: [Typical] Documentation for safe workflow
+
+```gherkin
+Scenario: [Typical] Contributor follows safe workflow docs
+  GIVEN a new contributor reads the repo docs
+  WHEN they follow the forking and Dev Container instructions
+  THEN they can reproduce the safe agent workflow without extra setup beyond Docker and VS Code Dev Containers
+```
+
+---
+
 ## US-001: Core Metric Calculation
 
 AS A codebase maintainer,
@@ -98,6 +145,18 @@ Scenario: [Typical] v26.03 DETAIL omits manual lines while SUMMARY counts them
   AND Weighted is 77.0%
   AND Fully AI is 50.0%
   AND Mostly AI is 80.0% when threshold is 60
+```
+
+### AC-001-8: [Typical] Aggregate set is window diff intersected with alive code
+
+```gherkin
+Scenario: [Typical] Metrics aggregate only the alive subset of the window diff
+  GIVEN a cumulative diff for the commit range fromCommit >= startTime through toCommit <= endTime contains added, modified, and deleted lines
+  AND the repository snapshot at endTime contains only the surviving current versions of those lines
+  WHEN aggregateGenCodeDesc computes the aggregate metrics
+  THEN the denominator is the count of lines in (startTime..endTime diff) intersected with (alive at endTime)
+  AND deleted or reverted lines in the diff do not contribute to the denominator
+  AND lines alive at endTime but last changed before startTime do not contribute to the denominator
 ```
 
 ---
@@ -771,7 +830,7 @@ Scenario: [Testability] Unit tests can set log level programmatically
 
 | US | Title | AC Count | Categories Covered |
 | -- | ----- | -------- | ------------------ |
-| US-001 | Core Metric Calculation | 7 | Typical, Edge |
+| US-001 | Core Metric Calculation | 8 | Typical, Edge |
 | US-002 | File-Level Conditions | 4 | Typical, Edge |
 | US-003 | Commit-Level Conditions | 6 | Typical, Edge |
 | US-004 | Line-Level Conditions | 6 | Typical, Edge |
@@ -781,7 +840,7 @@ Scenario: [Testability] Unit tests can set log level programmatically
 | US-008 | Scale and Performance | 4 | Performance, Edge, Robust |
 | US-009 | Algorithm-Specific Behavior | 9 | Typical, Edge, Fault |
 | US-010 | Diagnostics and Logging | 7 | Typical, Edge, Observability, Testability |
-| **Total** | | **59 AC** | |
+| **Total** | | **60 AC** | |
 
 ---
 
@@ -789,11 +848,12 @@ Scenario: [Testability] Unit tests can set log level programmatically
 
 This section tracks **implemented and tested coverage in this fork**. It is intentionally separate from the appendix below, which describes what is applicable by VCS and algorithm in the BASE specification.
 
-Last verified: 2026-05-06 with `git diff --check` and full VS Code test run (`110 passed`).
+Last verified: 2026-05-06 with `git diff --check` and full VS Code test run (`111 passed`).
 
 | User Story | Current Status | Covered By | Remaining Gap |
 | ---------- | -------------- | ---------- | ------------- |
-| US-001 Core Metric Calculation | Covered for current vertical slice | UnitTesting covers AC-001-1 through AC-001-6. SysTesting covers AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7 across Algorithm A/B/C paths. | Broader non-happy-path algorithm workflows still belong to US-002 through US-010. |
+| US-000 Safe Agent Sandbox | Partially covered by restored base workflow files | `.devcontainer/`, [README_ForkWorkflow.md](README_ForkWorkflow.md), [README_ForkWorkflow_ZH.md](README_ForkWorkflow_ZH.md), [README_TestGuide.md](README_TestGuide.md), and [README_TestGuide_ZH.md](README_TestGuide_ZH.md) now exist in this fork. | Manual Dev Container rebuild verification and an automated documentation/config check remain open. |
+| US-001 Core Metric Calculation | Covered for current vertical slice | UnitTesting covers AC-001-1 through AC-001-6. SysTesting covers AC-001-1, AC-001-2, AC-001-3, AC-001-6, and AC-001-7 across Algorithm A/B/C paths, plus AC-001-8 for Algorithm B alive-subset patch replay. | Broader non-happy-path algorithm workflows still belong to US-002 through US-010. |
 | US-002 File-Level Conditions | Covered for current Algorithm B synthetic fixtures | AlgB UnitTesting/SysTesting covers pure rename, rename+modify, deleted file exclusion, and copied file attribution with the original source retained. | Broader real-repository coverage for AlgA/AlgC and VCS-specific copy edge cases remains open. |
 | US-003 Commit-Level Conditions | Covered for current Algorithm B synthetic fixtures | Algorithm B UnitTesting covers merge, squash merge, cherry-pick, revert, amend/force-push orphan handling, and rebase regenerated revisionIds. Root CLI SysTesting covers amend/force-push and rebase orphan handling through `aggregateGenCodeDesc.py --algorithm B`. | Broader real-repository coverage for AlgA/AlgC, root CLI merge/squash/cherry-pick/revert fixtures, and VCS-provider-specific branch workflows remain open. |
 | US-004 Line-Level Conditions | Covered for current Algorithm B synthetic fixtures | Algorithm B UnitTesting covers human edits to AI lines, AI rewrites of manual lines, whitespace-only delete/add policy, file-wide replacement/line-ending style changes, identical delete/re-add attribution, and moved-line attribution. Root CLI SysTesting covers human/AI transfer output plus the emitted line ownership policy. | Broader real-repository coverage for AlgA/AlgC, VCS-specific whitespace/blame policy differences, and root CLI fixtures for every AC-004 edge case remain open. |
@@ -823,7 +883,7 @@ Last verified: 2026-05-06 with `git diff --check` and full VS Code test run (`11
 | Diagnostics UnitTesting | [tests/UnitTesting/test_diagnostics.py](tests/UnitTesting/test_diagnostics.py) | US-010 / AC-010-7 programmatic logger configuration without CLI state leakage |
 | Protocol loader UnitTesting | [tests/UnitTesting/test_protocol_loader.py](tests/UnitTesting/test_protocol_loader.py) | JSONC loading regression; not yet mapped to a formal user-story AC |
 | Protocol Validation UnitTesting | [tests/UnitTesting/test_protocol_validation_us006.py](tests/UnitTesting/test_protocol_validation_us006.py) | US-006 / AC-006-2 and AC-006-5 validation breadth for required top-level fields, required object/list/integer types, v26.03 line locations, v26.04 add-entry blame timestamps, and strict production Git/SVN revision ID validation |
-| CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7; US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures; US-007 / AC-007-2 partial; US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures and AC-009-6 partial |
+| CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7, AC-001-8; US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures; US-007 / AC-007-2 partial; US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures and AC-009-6 partial |
 | CLI Commit Workflow SysTesting | [tests/SysTesting/test_cli_us003.py](tests/SysTesting/test_cli_us003.py) | US-003 / AC-003-5 and AC-003-6 covered for root CLI Algorithm B patch-history orphan handling |
 | CLI Line-Level SysTesting | [tests/SysTesting/test_cli_us004.py](tests/SysTesting/test_cli_us004.py) | US-004 / AC-004-1, AC-004-2, and AC-004-3 covered for root CLI Algorithm B output and diagnostics policy |
 | CLI Branch/History SysTesting | [tests/SysTesting/test_cli_us005.py](tests/SysTesting/test_cli_us005.py) | US-005 / AC-005-2 and AC-005-5 covered for root CLI Algorithm B output and diagnostics policy |
@@ -848,7 +908,7 @@ Last verified: 2026-05-06 with `git diff --check` and full VS Code test run (`11
 3. **RED** — write a failing test from the GIVEN/WHEN/THEN scenario.
 4. **GREEN** — implement minimal code to pass.
 5. **REFACTOR** — clean up.
-6. When all 59 ACs pass → your implementation is correct per the BASE specification.
+6. When all 60 ACs pass → your implementation is correct per the BASE specification.
 
 > **Not every AC applies to every fork.** Git-only conditions (rebase, amend, shallow clone)
 > can be skipped by SVN forks. AlgC-specific ACs can be skipped by AlgA-only forks.
@@ -868,7 +928,7 @@ SVN is legacy — supported to the extent that the protocol allows, but with kno
 | AC | Git | SVN | Notes |
 | -- | --- | --- | ----- |
 | **US-001 (Core Metric)** | | | |
-| AC-001-1 ~ AC-001-7 | ✅ | ✅ | VCS-agnostic — pure math on genRatio values and sparse DETAIL semantics |
+| AC-001-1 ~ AC-001-8 | ✅ | ✅ | VCS-agnostic — metric math, sparse DETAIL semantics, and `(window diff) ∩ (alive at endTime)` aggregation set |
 | **US-002 (File-Level)** | | | |
 | AC-002-1 ~ AC-002-2 (rename) | ✅ | ✅ | Git: heuristic `-M`. SVN: explicit `svn move` — more reliable |
 | AC-002-3 (delete) | ✅ | ✅ | Same behavior |

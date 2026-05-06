@@ -19,7 +19,7 @@
   - **v26.03** — records AI-attributed lines only; blame discovered at analysis time from live VCS.
   - **v26.04** — incremental add/delete with embedded blame; self-sufficient without VCS access.
 - Three algorithms (A, B, C) that answer the same metric question using different line-origin discovery strategies.
-- Details: [README_Protocol.md](README_Protocol.md) | [README_AlgABC.md](README_AlgABC.md) | [Protocols/](Protocols/) | [README_UserStories.md](README_UserStories.md) | [README_UserGuide.md](README_UserGuide.md)
+- Details: [README_Protocol.md](README_Protocol.md) | [README_AlgABC.md](README_AlgABC.md) | [Protocols/](Protocols/) | [README_UserStories.md](README_UserStories.md) | [README_UserGuide.md](README_UserGuide.md) | [README_TestGuide.md](README_TestGuide.md)
 
 ## ======>>>WHAT WE WANT<<<======
 
@@ -28,6 +28,7 @@
   > **At `endTime`, what percentage of live code lines whose current version was added or modified in `[startTime, endTime]` is attributable to AI generation?**
 
 - The metric is defined on the **live snapshot** at `endTime` — deleted lines do not count, old versions do not count.
+- In set terms: aggregate lines = (`startTime..endTime` diff lines) ∩ (lines alive at `endTime`).
 - The metric supports **three modes**, controlled by a threshold parameter:
 
   | Mode | Threshold | Question it answers | Formula (on in-window live lines) |

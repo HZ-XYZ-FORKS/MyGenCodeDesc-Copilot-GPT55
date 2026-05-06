@@ -5,13 +5,20 @@
 
 这个 BASE 的每个 fork 用各自选定的语言（Python / C++ / Rust）和 CLI 规范实现本合约。
 
-- 相关文档：[README_ZH.md](README_ZH.md) · [README_UserStories.md](README_UserStories.md) · [README_AlgABC_ZH.md](README_AlgABC_ZH.md) · [README_Protocol_ZH.md](README_Protocol_ZH.md)
+- 相关文档：[README_ZH.md](README_ZH.md) · [README_UserStories.md](README_UserStories.md) · [README_AlgABC_ZH.md](README_AlgABC_ZH.md) · [README_Protocol_ZH.md](README_Protocol_ZH.md) · [README_TestGuide_ZH.md](README_TestGuide_ZH.md)
 
 ---
 
 ## 1. 概览
 
-`aggregateGenCodeDesc` 分析 `endTime` 时仓库快照中活着的代码，用三个度量来量化 AI 参与度：
+`aggregateGenCodeDesc` 先从 `startTime..endTime` 期间被新增或修改过的代码行开始，再只保留其中当前版本在 `endTime` 仍然存活的行，然后用三个度量来量化 AI 参与度。
+
+聚合对象是下面两个集合的交集：
+
+1. 由累计 `startTime..endTime` diff 新增或修改过的代码行；
+2. 在 `endTime` 仓库快照中仍然存活的代码行。
+
+`commitStart2EndTime.patch` 用来审计时间窗口 diff；JSON 指标只聚合这个 diff 里的存活子集。已删除、已 revert、或来源在窗口之前的行，都不能进入分母。
 
 1. **加权模式**：`Σ(genRatio / 100) / totalLines`
 2. **纯 AI 模式**：`count(genRatio == 100) / totalLines`
@@ -125,7 +132,7 @@
 | `codeAgent` | `"aggregateGenCodeDesc"`。 |
 | `REPOSITORY.repoURL` / `repoBranch` | 原样抄自输入参数。 |
 | `REPOSITORY.revisionId` | `"aggregate:<startTime>..<endTime>"` — 标识窗口的合成 id。 |
-| `SUMMARY.totalCodeLines` | 分母——窗口内全部活代码行数，包括可能从 `DETAIL` 省略的人写/未归因行。 |
+| `SUMMARY.totalCodeLines` | 分母——`(startTime..endTime diff) ∩ (endTime 仍存活)` 的行数，包括可能从 `DETAIL` 省略的人写/未归因行。 |
 | `SUMMARY.fullGeneratedCodeLines` | `genRatio == 100` 的行数（*纯 AI* 的分子）。 |
 | `SUMMARY.partialGeneratedCodeLines` | `0 < genRatio < 100` 的行数。 |
 | `SUMMARY.totalDocLines` / `fullGeneratedDocLines` / `partialGeneratedDocLines` | 同上，只统文档文件（Scope C/D）。代码和文档计数都满足 `total >= fullGenerated + partialGenerated`；差值就是有效 `genRatio=0` 的人写/未归因行。 |
@@ -208,10 +215,15 @@
 
 ### 3.2 `commitStart2EndTime.patch`
 
-从窗口开始前的父提交到窗口末尾 revision 的 **单个累积 unified diff**，作用在 `repoBranch` 上。等价于：
+`repoBranch` 上所选 revision 范围的 **单个累积 unified diff**：
+
+- `fromCommit` = `repoBranch` 上时间戳 `>= startTime` 的第一个 commit/revision。
+- `toCommit` = `repoBranch` 上时间戳 `<= endTime` 的最后一个 commit/revision。
+
+这个 patch 表示 `fromCommit..toCommit` 引入的净变化。对 Git 来说，为了把 `fromCommit` 自身的改动也包含进去，diff 命令会用 `fromCommit` 的父提交作为左端点：
 
 ```text
-git diff <revJustBeforeStartTime>..<revAtEndTime> -- <scope 路径>
+git diff <parentOfFromCommit>..<toCommit> -- <scope 路径>
 ```
 
 - **格式**：标准 unified diff（`diff --git ...` / `---` / `+++` / `@@` hunks）。用 `git apply` 或 `patch -p1` 可应用。
@@ -412,4 +424,4 @@ aggregateGenCodeDesc \
     - 12 个组合中哪些已支持（目标是全部 12 个；仅支持 Alg C 的 fork 可以跳过第 1、2、7、8 格）。
     - 每个组合的已知局限（如"Alg B 尚未实现"）。
     - `--onMissing`、`--onDuplicate`、`--onClockSkew` 的默认策略。
-4. [README_UserStories.md](README_UserStories.md) 里的全部 59 条验收标准都是测试目标。
+4. [README_UserStories.md](README_UserStories.md) 里的全部 60 条验收标准都是测试目标。

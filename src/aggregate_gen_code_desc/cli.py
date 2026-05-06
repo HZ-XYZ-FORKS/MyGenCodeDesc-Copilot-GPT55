@@ -110,9 +110,30 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_build_stdout_metric_result(metrics, args.threshold), sort_keys=True))
     except Exception as error:
         logger.error("CLI", f"aggregateGenCodeDesc: {error}")
-        return 2
+        return _exit_code_for_error(error)
 
     return 0
+
+
+def _exit_code_for_error(error: Exception) -> int:
+    if _is_runtime_io_error(error):
+        return 1
+    if isinstance(error, ValueError):
+        return 2
+    return 1
+
+
+def _is_runtime_io_error(error: Exception) -> bool:
+    if isinstance(error, OSError):
+        return True
+
+    cause = error.__cause__
+    while cause is not None:
+        if isinstance(cause, OSError):
+            return True
+        cause = cause.__cause__
+
+    return "VCS access failed" in str(error)
 
 
 def _emit_load_logs(logger: Logger, diagnostics: dict) -> None:

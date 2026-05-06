@@ -23,7 +23,7 @@
   - **v26.03** —— 只记 AI 相关的行；blame 信息在分析时从活的 VCS 里现查。
   - **v26.04** —— 增量式 add/delete，内嵌 blame 信息；不用访问 VCS 就能自给自足。
 - 三种算法（A、B、C），回答同一个度量问题，但用不同的方法来发现行的来源。
-- 细节在这里：[README_Protocol_ZH.md](README_Protocol_ZH.md) | [README_AlgABC_ZH.md](README_AlgABC_ZH.md) | [Protocols/](Protocols/) | [README_UserStories.md](README_UserStories.md) | [README_UserGuide_ZH.md](README_UserGuide_ZH.md)
+- 细节在这里：[README_Protocol_ZH.md](README_Protocol_ZH.md) | [README_AlgABC_ZH.md](README_AlgABC_ZH.md) | [Protocols/](Protocols/) | [README_UserStories.md](README_UserStories.md) | [README_UserGuide_ZH.md](README_UserGuide_ZH.md) | [README_TestGuide_ZH.md](README_TestGuide_ZH.md)
 
 ## ======>>>我们想要什么<<<======
 
@@ -32,6 +32,7 @@
   > **在 `endTime` 这个时间点，活着的代码行里，凡是在 `[startTime, endTime]` 期间被新增或修改过的那些行，有多大比例归功于 AI 生成？**
 
 - 这个度量是基于 `endTime` 时的**活快照**来算的——已删除的行不算，旧版本不算。
+- 用集合来描述：聚合行 = (`startTime..endTime` diff 里的行) ∩ (`endTime` 时仍然活着的行)。
 - 度量支持**三种模式**，通过阈值参数控制：
 
   | 模式 | 阈值 | 回答的问题 | 公式（基于窗口内活行） |
