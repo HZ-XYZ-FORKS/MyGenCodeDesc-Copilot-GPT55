@@ -119,8 +119,6 @@ def test_aggregate_gen_code_desc_py_algorithm_a_reports_vcs_access_failure_and_w
             "A",
             "--repoPath",
             str(tmp_path / "missing-repo"),
-            "--endRev",
-            "HEAD",
         ],
         output_dir,
     )

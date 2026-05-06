@@ -5,7 +5,7 @@
 
 这个 BASE 的每个 fork 用各自选定的语言（Python / C++ / Rust）和 CLI 规范实现本合约。
 
-- 相关文档：[README_ZH.md](README_ZH.md) · [README_UserStories.md](README_UserStories.md) · [README_AlgABC_ZH.md](README_AlgABC_ZH.md) · [README_Protocol_ZH.md](README_Protocol_ZH.md) · [README_TestGuide_ZH.md](README_TestGuide_ZH.md)
+- 相关文档：[README_ZH.md](README_ZH.md) · [README_UserStories_ZH.md](README_UserStories_ZH.md) · [README_AlgABC_ZH.md](README_AlgABC_ZH.md) · [README_Protocol_ZH.md](README_Protocol_ZH.md) · [README_TestGuide_ZH.md](README_TestGuide_ZH.md)
 
 ---
 
@@ -19,6 +19,13 @@
 2. 在 `endTime` 仓库快照中仍然存活的代码行。
 
 `commitStart2EndTime.patch` 用来审计时间窗口 diff；JSON 指标只聚合这个 diff 里的存活子集。已删除、已 revert、或来源在窗口之前的行，都不能进入分母。
+
+示例：如果 `startTime=2026-04-01`，`endTime=2026-04-30`，并且分支上对应的 commits 和 `genCodeDescV26.03` 记录分别在 `2026-04-03`、`2026-04-07`、`2026-04-15`，那么：
+
+- `fromCommit` 是 `2026-04-03` 的 commit。
+- `toCommit` 是 `2026-04-15` 的 commit。
+- `commitStart2EndTime.patch` 覆盖这三个 commit 引入的累计变化。
+- JSON 指标只统计这些 commit 新增或修改过、并且当前版本在 `endTime=2026-04-30` 仍然存活的行。
 
 1. **加权模式**：`Σ(genRatio / 100) / totalLines`
 2. **纯 AI 模式**：`count(genRatio == 100) / totalLines`
@@ -75,7 +82,6 @@
 | `--scope` | 按需 | 文件/路径过滤：`A`、`B`、`C` 或 `D`（见 [README_Protocol_ZH.md](README_Protocol_ZH.md) — 范围定义）。 |
 | `--outputDir` | 按需 | 两个输出产物写到的目录（不存在就新建），见 §3。 |
 | `--repoPath` | 无 | **仅 Alg A。** 本地仓库工作副本路径。Alg A 跑 git/svn 时需要。若没提供且 `--repoUrl` 是远端，fork 可自动克隆。 |
-| `--endRev` | `HEAD` | **仅 Alg A。** 执行 blame 时的目标 revision。 |
 | `--commitPatchDir` | 无 | **仅 Alg B。** 预先算好的每个 revision 的 unified diff 文件放这里，用于离线重放，见 §2.4。 |
 | `--blameWhitespace` | `respect` | **仅 Alg A + Git。** `respect` 或 `ignore`（对应 `git blame -w`），见 AC-004-3。 |
 | `--renameDetection` | `basic` | **仅 Git + Alg A/B。** `off` / `basic`（`-M`）/ `aggressive`（`-M -C -C`）。 |
@@ -344,7 +350,7 @@ git diff <parentOfFromCommit>..<toCommit> -- <scope 路径>
 
 ## 5. 校验和错误分类
 
-对应 [README_UserStories.md](README_UserStories.md) US-006：
+对应 [README_UserStories_ZH.md](README_UserStories_ZH.md) US-006：
 
 | 情况 | 参数 | 默认 | 退出码 |
 |---|---|---|---|
@@ -424,4 +430,4 @@ aggregateGenCodeDesc \
     - 12 个组合中哪些已支持（目标是全部 12 个；仅支持 Alg C 的 fork 可以跳过第 1、2、7、8 格）。
     - 每个组合的已知局限（如"Alg B 尚未实现"）。
     - `--onMissing`、`--onDuplicate`、`--onClockSkew` 的默认策略。
-4. [README_UserStories.md](README_UserStories.md) 里的全部 60 条验收标准都是测试目标。
+4. [README_UserStories_ZH.md](README_UserStories_ZH.md) 里的全部 60 条验收标准都是测试目标。

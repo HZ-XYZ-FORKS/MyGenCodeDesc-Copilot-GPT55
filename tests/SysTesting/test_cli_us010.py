@@ -173,8 +173,6 @@ def _run_algorithm_a(gen_code_desc_dir, repo_path, end_rev, output_dir, extra_ar
         "A",
         "--repoPath",
         str(repo_path),
-        "--endRev",
-        end_rev,
         "--outputDir",
         str(output_dir),
     ]

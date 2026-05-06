@@ -577,8 +577,6 @@ def test_aggregate_gen_code_desc_py_supports_v2603_with_algorithm_a(tmp_path):
             "60",
             "--repoPath",
             str(repo_path),
-            "--endRev",
-            revision_id,
             "--outputDir",
             str(output_dir),
         ],

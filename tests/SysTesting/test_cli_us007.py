@@ -127,8 +127,6 @@ def _run_algorithm_a_svn(gen_code_desc_dir, working_copy_path, output_dir):
             "A",
             "--repoPath",
             str(working_copy_path),
-            "--endRev",
-            "HEAD",
             "--outputDir",
             str(output_dir),
         ],

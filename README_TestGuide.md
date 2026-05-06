@@ -11,9 +11,9 @@ The test suite is divided into three layers:
 
 | Layer | Purpose | Main audience | Typical location |
 | --- | --- | --- | --- |
-| UnitTesting | Verify small deterministic logic in isolation. | Tool developer | `tests/unit/` |
-| SysTesting | Verify complete CLI/tool behavior across realistic repositories and protocol files. | Tool developer / maintainer | `tests/system/` |
-| UserTesting | Verify user-facing workflows from the guide and user stories. | Codebase maintainer / reviewer | `tests/user/` or `tests/demo/` |
+| UnitTesting | Verify small deterministic logic in isolation. | Tool developer | `tests/UnitTesting/` |
+| SysTesting | Verify complete CLI/tool behavior across realistic repositories and protocol files. | Tool developer / maintainer | `tests/SysTesting/` |
+| UserTesting | Verify user-facing workflows from the guide and user stories. | Codebase maintainer / reviewer | `tests/UserTesting/` or `tests/demo/` |
 
 All tests should run inside the Dev Container described by [README_ForkWorkflow.md](README_ForkWorkflow.md), so code agents can execute them in a safe and reproducible environment.
 

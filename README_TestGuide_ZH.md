@@ -11,9 +11,9 @@
 
 | 层级 | 目的 | 主要受众 | 典型位置 |
 | --- | --- | --- | --- |
-| UnitTesting | 隔离验证小而确定的逻辑。 | 工具开发者 | `tests/unit/` |
-| SysTesting | 使用真实仓库和协议文件验证完整 CLI/工具行为。 | 工具开发者 / 维护者 | `tests/system/` |
-| UserTesting | 验证用户指南和用户故事中的面向用户工作流。 | 代码库维护者 / 审阅者 | `tests/user/` 或 `tests/demo/` |
+| UnitTesting | 隔离验证小而确定的逻辑。 | 工具开发者 | `tests/UnitTesting/` |
+| SysTesting | 使用真实仓库和协议文件验证完整 CLI/工具行为。 | 工具开发者 / 维护者 | `tests/SysTesting/` |
+| UserTesting | 验证用户指南和用户故事中的面向用户工作流。 | 代码库维护者 / 审阅者 | `tests/UserTesting/` 或 `tests/demo/` |
 
 所有测试都应在 [README_ForkWorkflow_ZH.md](README_ForkWorkflow_ZH.md) 描述的 Dev Container 内运行，这样代码代理可以在安全、可复现的环境中执行测试。
 

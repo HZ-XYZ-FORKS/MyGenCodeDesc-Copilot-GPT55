@@ -24,7 +24,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--algorithm", choices=["A", "B", "C"], default="C")
     parser.add_argument("--scope", choices=["A", "B", "C", "D"], default="A")
     parser.add_argument("--repoPath")
-    parser.add_argument("--endRev", default="HEAD")
     parser.add_argument("--commitPatchDir")
     parser.add_argument("--blameWhitespace", choices=["respect", "ignore"], default="respect")
     parser.add_argument("--renameDetection", choices=["off", "basic", "aggressive"], default="basic")
@@ -53,7 +52,6 @@ def main(argv: list[str] | None = None) -> int:
                 repo_url=args.repoUrl,
                 repo_branch=args.repoBranch,
                 repo_path=Path(args.repoPath or args.repoUrl),
-                end_rev=args.endRev,
                 start_time=args.startTime,
                 end_time=args.endTime,
                 scope=args.scope,

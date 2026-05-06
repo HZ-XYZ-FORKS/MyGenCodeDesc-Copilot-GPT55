@@ -40,10 +40,10 @@ def collect_algorithm_a_lines(
     repo_url: str,
     repo_branch: str,
     repo_path: Path,
-    end_rev: str,
     start_time: str,
     end_time: str,
     scope: str,
+    end_rev: str | None = None,
     on_missing: str = "zero",
     on_duplicate: str = "reject",
     blame_whitespace: str = "respect",
@@ -60,13 +60,17 @@ def collect_algorithm_a_lines(
     attribution_index = _build_v2603_attribution_index(loaded.records, scope)
     loaded_revision_ids = {str(record["REPOSITORY"]["revisionId"]) for record in loaded.records}
     vcs_type = str(loaded.records[-1].get("REPOSITORY", {}).get("vcsType", "git"))
+    effective_end_rev = ""
     missing_revision_ids: set[str] = set()
     lines: list[GenerationLine] = []
     process_details: list[str] = []
 
     try:
-        for file_path, line_kind in _list_scoped_files(repo_path, end_rev, scope, vcs_type):
-            for blame_line in _blame_lines(repo_path, end_rev, file_path, vcs_type, blame_whitespace, rename_detection):
+        effective_end_rev = _resolve_effective_end_rev(repo_path, end_time, end_rev, vcs_type)
+        for file_path, line_kind in _list_scoped_files(repo_path, effective_end_rev, scope, vcs_type):
+            for blame_line in _blame_lines(
+                repo_path, effective_end_rev, file_path, vcs_type, blame_whitespace, rename_detection
+            ):
                 if not start_dt <= blame_line.timestamp <= end_dt:
                     continue
                 if blame_line.revision_id not in loaded_revision_ids:
@@ -96,9 +100,13 @@ def collect_algorithm_a_lines(
                     )
                 )
         if vcs_type.lower() == "svn":
-            patch_text = _build_svn_patch_artifact(repo_path, repo_url, repo_branch, start_time, end_time, end_rev, scope)
+            patch_text = _build_svn_patch_artifact(
+                repo_path, repo_url, repo_branch, start_time, end_time, effective_end_rev, scope
+            )
         else:
-            patch_text = _build_git_patch_artifact(repo_path, repo_url, repo_branch, start_time, end_time, end_rev, scope)
+            patch_text = _build_git_patch_artifact(
+                repo_path, repo_url, repo_branch, start_time, end_time, effective_end_rev, scope
+            )
     except RuntimeError as error:
         raise ValueError(_format_vcs_access_failure(repo_url, error)) from error
 
@@ -118,12 +126,30 @@ def collect_algorithm_a_lines(
                 "onDuplicate": on_duplicate,
                 "blameWhitespace": blame_whitespace,
                 "renameDetection": rename_detection,
+                "effectiveEndRevision": effective_end_rev,
             },
             "processDetails": process_details,
             "recordsLoaded": loaded.record_summaries,
         },
         patch_text=patch_text,
     )
+
+
+def _resolve_effective_end_rev(repo_path: Path, end_time: str, end_rev: str | None, vcs_type: str) -> str:
+    if end_rev:
+        return end_rev
+    if vcs_type.lower() == "svn":
+        return "HEAD"
+    return _git_revision_at_or_before(repo_path, end_time, "HEAD")
+
+
+def _git_revision_at_or_before(repo_path: Path, end_time: str, revision_range: str) -> str:
+    end_dt = parse_utc_datetime(end_time)
+    commits = _git_commits_with_timestamps(repo_path, revision_range)
+    for revision_id, timestamp in commits:
+        if timestamp <= end_dt:
+            return revision_id
+    raise ValueError(f"no Git revision exists at or before endTime: {end_time}")
 
 
 def algorithm_a_policy() -> dict[str, str]:

@@ -20,6 +20,13 @@ The aggregate set is the intersection of:
 
 `commitStart2EndTime.patch` audits the window diff; the JSON metrics aggregate only the alive subset of that diff. Deleted, reverted, or pre-window-origin lines must not enter the denominator.
 
+Example: if `startTime=2026-04-01`, `endTime=2026-04-30`, and the branch has matching commits and `genCodeDescV26.03` records on `2026-04-03`, `2026-04-07`, and `2026-04-15`, then:
+
+- `fromCommit` is the `2026-04-03` commit.
+- `toCommit` is the `2026-04-15` commit.
+- `commitStart2EndTime.patch` covers the cumulative change introduced by those three commits.
+- JSON metrics count only lines added or modified by those commits whose current versions are still alive at `endTime=2026-04-30`.
+
 1. **Weighted mode**: `Σ(genRatio / 100) / totalLines`
 2. **Fully AI mode**: `count(genRatio == 100) / totalLines`
 3. **Mostly AI mode**: `count(genRatio >= threshold) / totalLines`
@@ -75,7 +82,6 @@ All other CLI arguments are optional, or are used only when the selected mode, a
 | `--scope` | As needed | File/path filter: `A`, `B`, `C`, or `D` (see [README_Protocol.md](README_Protocol.md) — Scope Definitions). |
 | `--outputDir` | As needed | Directory where output artifacts are written (created if missing). See §3. |
 | `--repoPath` | none | **Alg A only.** Path to a local working copy of the repository. Needed for Alg A git/svn. If not given and `--repoUrl` is remote, the fork may auto-clone. |
-| `--endRev` | `HEAD` | **Alg A only.** Revision to blame at. |
 | `--commitPatchDir` | none | **Alg B only.** Directory holding per-revision unified diff files for offline replay. See §2.4. |
 | `--blameWhitespace` | `respect` | **Alg A, Git only.** `respect` or `ignore` (cf. `git blame -w`). See AC-004-3. |
 | `--renameDetection` | `basic` | **Alg A/B, Git only.** `off` / `basic` (`-M`) / `aggressive` (`-M -C -C`). |

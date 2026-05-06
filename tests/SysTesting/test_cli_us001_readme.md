@@ -24,7 +24,7 @@ Implemented / Passing
 - AC-001-3: Mostly AI mode counts genRatio >= threshold.
 - AC-001-6: No in-window lines yields zero denominator.
 - AC-001-7: Sparse v26.03 DETAIL treats omitted lines as manual.
-- CLI arguments: `--repoUrl`, `--repoBranch`, `--startTime`, `--endTime`, `--genCodeDescDir`, `--algorithm`, `--scope`, `--threshold`, `--repoPath`, `--endRev`, `--commitPatchDir`, `--outputDir`.
+- CLI arguments: `--repoUrl`, `--repoBranch`, `--startTime`, `--endTime`, `--genCodeDescDir`, `--algorithm`, `--scope`, `--threshold`, `--repoPath`, `--commitPatchDir`, `--outputDir`.
 - System behavior: top-level `aggregateGenCodeDesc.py` writes `genCodeDescV26.03.json` and `commitStart2EndTime.patch`.
 - Algorithm coverage: A, B, and C.
 - Protocol coverage: v26.03 and v26.04.
