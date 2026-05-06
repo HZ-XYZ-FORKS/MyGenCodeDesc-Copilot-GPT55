@@ -64,9 +64,14 @@ def collect_algorithm_a_lines(
     missing_revision_ids: set[str] = set()
     lines: list[GenerationLine] = []
     process_details: list[str] = []
+    warnings = list(loaded.warnings)
 
     try:
         effective_end_rev = _resolve_effective_end_rev(repo_path, end_time, end_rev, vcs_type)
+        if vcs_type.lower() == "git" and _git_is_shallow_repo(repo_path):
+            warnings.append(
+                "Algorithm A detected shallow Git history; blame may stop at the shallow boundary and metrics may be partial"
+            )
         for file_path, line_kind in _list_scoped_files(repo_path, effective_end_rev, scope, vcs_type):
             for blame_line in _blame_lines(
                 repo_path, effective_end_rev, file_path, vcs_type, blame_whitespace, rename_detection
@@ -118,7 +123,7 @@ def collect_algorithm_a_lines(
             "missingRevisions": sorted(missing_revision_ids),
             "duplicateRevisions": [],
             "clockSkewDetected": False,
-            "warnings": loaded.warnings,
+            "warnings": warnings,
             "scalePolicy": scale_policy(),
             "algorithmAPolicy": algorithm_a_policy(),
             "validationPolicy": {
@@ -150,6 +155,13 @@ def _git_revision_at_or_before(repo_path: Path, end_time: str, revision_range: s
         if timestamp <= end_dt:
             return revision_id
     raise ValueError(f"no Git revision exists at or before endTime: {end_time}")
+
+
+def _git_is_shallow_repo(repo_path: Path) -> bool:
+    try:
+        return _run_git(repo_path, "rev-parse", "--is-shallow-repository") == "true"
+    except RuntimeError:
+        return False
 
 
 def algorithm_a_policy() -> dict[str, str]:

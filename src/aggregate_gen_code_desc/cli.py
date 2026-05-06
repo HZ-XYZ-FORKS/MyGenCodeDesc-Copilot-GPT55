@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from typing import Iterator
+from urllib.parse import unquote, urlparse
 
 from aggregate_gen_code_desc.algorithm_a import collect_algorithm_a_lines
 from aggregate_gen_code_desc.algorithm_b import collect_algorithm_b_lines
@@ -47,19 +52,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         logger.debug("CLI", f"algorithm={args.algorithm} scope={args.scope}")
         if args.algorithm == "A":
-            algorithm_result = collect_algorithm_a_lines(
-                gen_code_desc_dir=Path(args.genCodeDescDir),
-                repo_url=args.repoUrl,
-                repo_branch=args.repoBranch,
-                repo_path=Path(args.repoPath or args.repoUrl),
-                start_time=args.startTime,
-                end_time=args.endTime,
-                scope=args.scope,
-                on_missing=args.onMissing or "zero",
-                on_duplicate=args.onDuplicate,
-                blame_whitespace=args.blameWhitespace,
-                rename_detection=args.renameDetection,
-            )
+            with _algorithm_a_repo_path(args.repoUrl, args.repoPath, args.repoBranch) as repo_path:
+                algorithm_result = collect_algorithm_a_lines(
+                    gen_code_desc_dir=Path(args.genCodeDescDir),
+                    repo_url=args.repoUrl,
+                    repo_branch=args.repoBranch,
+                    repo_path=repo_path,
+                    start_time=args.startTime,
+                    end_time=args.endTime,
+                    scope=args.scope,
+                    on_missing=args.onMissing or "zero",
+                    on_duplicate=args.onDuplicate,
+                    blame_whitespace=args.blameWhitespace,
+                    rename_detection=args.renameDetection,
+                )
         elif args.algorithm == "C":
             algorithm_result = collect_algorithm_c_lines(
                 gen_code_desc_dir=Path(args.genCodeDescDir),
@@ -111,6 +117,59 @@ def main(argv: list[str] | None = None) -> int:
         return _exit_code_for_error(error)
 
     return 0
+
+
+@contextlib.contextmanager
+def _algorithm_a_repo_path(repo_url: str, repo_path_arg: str | None, repo_branch: str) -> Iterator[Path]:
+    if repo_path_arg is not None:
+        yield Path(repo_path_arg)
+        return
+
+    local_path = _local_repo_path_from_url(repo_url)
+    if local_path is not None and _is_git_working_copy(local_path):
+        yield local_path
+        return
+
+    with tempfile.TemporaryDirectory(prefix="aggregateGenCodeDesc-algA-") as temp_dir:
+        clone_path = Path(temp_dir) / "repo"
+        _clone_git_repo(repo_url, repo_branch, clone_path)
+        yield clone_path
+
+
+def _local_repo_path_from_url(repo_url: str) -> Path | None:
+    parsed = urlparse(repo_url)
+    if parsed.scheme == "file":
+        return Path(unquote(parsed.path))
+    if parsed.scheme == "":
+        path = Path(repo_url)
+        if path.exists():
+            return path
+    return None
+
+
+def _is_git_working_copy(path: Path) -> bool:
+    if not path.exists():
+        return False
+    completed = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=path,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    return completed.returncode == 0 and completed.stdout.strip() == "true"
+
+
+def _clone_git_repo(repo_url: str, repo_branch: str, clone_path: Path) -> None:
+    completed = subprocess.run(
+        ["git", "clone", "--branch", repo_branch, "--", repo_url, str(clone_path)],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        message = completed.stderr.strip() or completed.stdout.strip() or f"git clone exited {completed.returncode}"
+        raise OSError(message)
 
 
 def _exit_code_for_error(error: Exception) -> int:
