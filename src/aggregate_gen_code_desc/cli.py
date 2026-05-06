@@ -169,7 +169,14 @@ def _clone_git_repo(repo_url: str, repo_branch: str, clone_path: Path) -> None:
     )
     if completed.returncode != 0:
         message = completed.stderr.strip() or completed.stdout.strip() or f"git clone exited {completed.returncode}"
-        raise OSError(message)
+        raise OSError(_format_algorithm_a_vcs_access_failure(repo_url, message))
+
+
+def _format_algorithm_a_vcs_access_failure(repo_url: str, message: str) -> str:
+    return (
+        f"Algorithm A VCS access failed for {repo_url}: {message}. "
+        "retry after the VCS connection or local repository is available, or use Algorithm C when embedded blame is available."
+    )
 
 
 def _exit_code_for_error(error: Exception) -> int:

@@ -22,11 +22,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # US-UAT-002: As a codebase maintainer, I want Algorithm A to prepare a working copy for a remote Git URL when `--repoPath` is omitted, so that the documented remote workflow is usable.
 # US-UAT-003: As a codebase maintainer, I want Algorithm A to flag shallow Git history, so that I do not mistake partial blame for authoritative production output.
 # US-UAT-004: As a codebase maintainer using SVN, I want Algorithm A patch artifacts to honor `[startTime, endTime]`, so that audit output does not include outside-window revisions.
+# US-UAT-005: As a codebase maintainer, I want remote Git outage failures to be explicit and non-partial, so that I can retry safely or switch algorithms.
 # AC-UAT-001: GIVEN a line is introduced inside the window and deleted after endTime, WHEN the maintainer runs Algorithm A without `--endRev`, THEN the result counts the line as alive at endTime.
 # AC-UAT-002: GIVEN the maintainer asks for CLI help, WHEN the help text is printed, THEN the removed BASE option `--endRev` is not advertised.
 # AC-UAT-003: GIVEN a Git remote URL and no `--repoPath`, WHEN the maintainer runs Algorithm A, THEN the tool clones/checks out the branch and writes valid metrics.
 # AC-UAT-004: GIVEN a shallow Git working copy, WHEN the maintainer runs Algorithm A, THEN diagnostics warn that blame may be partial at the shallow boundary.
 # AC-UAT-005: GIVEN an SVN file is added inside the window and deleted after endTime, WHEN the maintainer runs Algorithm A, THEN metrics and `commitStart2EndTime.patch` use the SVN snapshot at endTime.
+# AC-UAT-006: GIVEN a Git remote URL cannot be cloned and no `--repoPath` is provided, WHEN the maintainer runs Algorithm A, THEN the CLI exits with runtime failure guidance and writes no partial outputs.
 #
 # TEST CASE SPECIFICATIONS
 # [@AC-UAT-001,US-UAT-001]
@@ -59,6 +61,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #    @[Purpose]: Proves SVN audit artifacts and metrics are constrained to the documented measurement window.
 #    @[Brief]: Creates SVN revisions before, inside, and after the window, deletes the in-window file after endTime, and runs the root CLI.
 #    @[Expect]: The aggregate JSON counts the in-window file and the patch includes only the in-window add.
+# [@AC-UAT-006,US-UAT-005]
+#  TC-UAT-006 P1 Functional / Fault
+#    @[Name]: verifyAlgARemoteWorkflow_whenCloneFails_expectGuidanceAndNoPartialOutput
+#    @[Purpose]: Makes remote outage behavior safe and actionable for production users.
+#    @[Brief]: Points Algorithm A at a missing Git remote without `--repoPath`.
+#    @[Expect]: The CLI exits 1, reports Algorithm A VCS recovery guidance, and writes no aggregate or patch files.
 #
 # TODO/TRACKING
 # - TC-UAT-001: TODO -> RED -> GREEN
@@ -66,6 +74,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # - TC-UAT-003: TODO -> RED -> GREEN
 # - TC-UAT-004: TODO -> RED -> GREEN
 # - TC-UAT-005: TODO -> RED -> GREEN
+# - TC-UAT-006: TODO -> RED -> GREEN
 
 
 def _run_git(repo_path, *args, env=None):
@@ -137,6 +146,11 @@ def _run_root_cli(args):
         text=True,
         capture_output=True,
     )
+
+
+def _assert_no_partial_outputs(output_dir):
+    assert not (output_dir / "genCodeDescV26.03.json").exists()
+    assert not (output_dir / "commitStart2EndTime.patch").exists()
 
 
 def _clone_bare(source_repo_path, bare_repo_path):
@@ -419,3 +433,41 @@ def test_alg_a_svn_workflow_uses_end_time_snapshot_and_patch_window(tmp_path):
         "patchContainsPreFile": False,
         "patchContainsPostFile": False,
     }
+
+
+# [@TC-UAT-006]
+# @[Name]: verifyAlgARemoteWorkflow_whenCloneFails_expectGuidanceAndNoPartialOutput
+# @[Steps]: SETUP missing Git remote and matching genCodeDesc -> BEHAVIOR run documented remote CLI -> VERIFY failure guidance and no outputs -> CLEANUP tmp_path
+def test_alg_a_remote_clone_failure_reports_guidance_and_writes_no_output(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    missing_remote_url = (tmp_path / "missing-origin.git").as_uri()
+    gen_code_desc_dir.mkdir()
+    _write_v2603_record(gen_code_desc_dir / "missing-remote.json", missing_remote_url, "a" * 40)
+
+    completed = _run_root_cli(
+        [
+            "--repoUrl",
+            missing_remote_url,
+            "--repoBranch",
+            "main",
+            "--startTime",
+            "2026-01-01T00:00:00Z",
+            "--endTime",
+            "2026-01-31T00:00:00Z",
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "A",
+            "--scope",
+            "A",
+            "--outputDir",
+            str(output_dir),
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "Algorithm A VCS access failed" in completed.stderr
+    assert "retry" in completed.stderr
+    assert "Algorithm C" in completed.stderr
+    _assert_no_partial_outputs(output_dir)
