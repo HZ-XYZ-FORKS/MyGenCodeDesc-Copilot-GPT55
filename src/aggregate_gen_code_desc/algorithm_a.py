@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from aggregate_gen_code_desc.diagnostics import scale_policy
 from aggregate_gen_code_desc.metrics import GenerationLine
@@ -144,7 +145,7 @@ def _resolve_effective_end_rev(repo_path: Path, end_time: str, end_rev: str | No
     if end_rev:
         return end_rev
     if vcs_type.lower() == "svn":
-        return "HEAD"
+        return _svn_revision_at_or_before(repo_path, end_time)
     return _git_revision_at_or_before(repo_path, end_time, "HEAD")
 
 
@@ -162,6 +163,24 @@ def _git_is_shallow_repo(repo_path: Path) -> bool:
         return _run_git(repo_path, "rev-parse", "--is-shallow-repository") == "true"
     except RuntimeError:
         return False
+
+
+def _svn_revision_at_or_before(repo_path: Path, end_time: str) -> str:
+    end_dt = parse_utc_datetime(end_time)
+    revisions = _svn_revisions_with_timestamps(repo_path)
+    candidates = [(revision_id, timestamp) for revision_id, timestamp in revisions if timestamp <= end_dt]
+    if not candidates:
+        raise ValueError(f"no SVN revision exists at or before endTime: {end_time}")
+    return str(max(candidates, key=lambda item: int(item[0]))[0])
+
+
+def _svn_revision_before(repo_path: Path, start_time: str) -> str:
+    start_dt = parse_utc_datetime(start_time)
+    revisions = _svn_revisions_with_timestamps(repo_path)
+    candidates = [(revision_id, timestamp) for revision_id, timestamp in revisions if timestamp < start_dt]
+    if not candidates:
+        return "0"
+    return str(max(candidates, key=lambda item: int(item[0]))[0])
 
 
 def algorithm_a_policy() -> dict[str, str]:
@@ -193,7 +212,7 @@ def _build_v2603_attribution_index(
 
 def _list_scoped_files(repo_path: Path, end_rev: str, scope: str, vcs_type: str = "git") -> list[tuple[str, str]]:
     if vcs_type.lower() == "svn":
-        return _list_scoped_svn_files(repo_path, scope)
+        return _list_scoped_svn_files(repo_path, end_rev, scope)
     output = _run_git(repo_path, "ls-tree", "-r", "--name-only", end_rev)
     scoped_files = []
     for file_path in output.splitlines():
@@ -203,12 +222,12 @@ def _list_scoped_files(repo_path: Path, end_rev: str, scope: str, vcs_type: str 
     return scoped_files
 
 
-def _list_scoped_svn_files(repo_path: Path, scope: str) -> list[tuple[str, str]]:
+def _list_scoped_svn_files(repo_path: Path, end_rev: str, scope: str) -> list[tuple[str, str]]:
+    output = _run_svn(repo_path, "list", "-R", "-r", end_rev, _svn_repository_target(repo_path, "", end_rev))
     scoped_files = []
-    for path in sorted(repo_path.rglob("*")):
-        if not path.is_file() or ".svn" in path.parts:
+    for file_path in output.splitlines():
+        if file_path.endswith("/"):
             continue
-        file_path = path.relative_to(repo_path).as_posix()
         line_kind = _line_kind_for_scope(file_path, scope)
         if line_kind is not None:
             scoped_files.append((file_path, line_kind))
@@ -325,7 +344,8 @@ def _build_svn_patch_artifact(
     end_rev: str,
     scope: str,
 ) -> str:
-    diff_text = _run_svn(repo_path, "diff", "-r", f"0:{end_rev}")
+    base_rev = _svn_revision_before(repo_path, start_time)
+    diff_text = _run_svn(repo_path, "diff", "-r", f"{base_rev}:{end_rev}", _svn_repository_target(repo_path, "", end_rev))
     header = [
         f"# repoURL: {repo_url}\n",
         f"# repoBranch: {repo_branch}\n",
@@ -382,7 +402,7 @@ def _run_git(repo_path: Path, *args: str) -> str:
 
 
 def _svn_blame_lines(repo_path: Path, end_rev: str, file_path: str) -> list[BlameLine]:
-    output = _run_svn(repo_path, "blame", "--xml", "-r", end_rev, file_path)
+    output = _run_svn(repo_path, "blame", "--xml", "-r", end_rev, _svn_repository_target(repo_path, file_path, end_rev))
     root = ET.fromstring(output)
     lines: list[BlameLine] = []
     for entry in root.findall(".//entry"):
@@ -405,6 +425,27 @@ def _svn_blame_lines(repo_path: Path, end_rev: str, file_path: str) -> list[Blam
             )
         )
     return lines
+
+
+def _svn_revisions_with_timestamps(repo_path: Path) -> list[tuple[str, datetime]]:
+    output = _run_svn(repo_path, "log", "--xml", "-r", "0:HEAD")
+    root = ET.fromstring(output)
+    revisions = []
+    for entry in root.findall(".//logentry"):
+        revision_id = entry.attrib.get("revision", "")
+        date_text = entry.findtext("date")
+        if revision_id and date_text:
+            revisions.append((revision_id, parse_utc_datetime(date_text)))
+    return revisions
+
+
+def _svn_repository_target(repo_path: Path, file_path: str, revision_id: str) -> str:
+    root_url = _run_svn(repo_path, "info", "--show-item", "repos-root-url").rstrip("/")
+    relative_url = _run_svn(repo_path, "info", "--show-item", "relative-url").removeprefix("^/").strip("/")
+    target_path = "/".join(part for part in [relative_url, file_path.strip("/")] if part)
+    if target_path:
+        return f"{root_url}/{quote(target_path, safe='/')}@{revision_id}"
+    return f"{root_url}@{revision_id}"
 
 
 def _run_svn(repo_path: Path, *args: str) -> str:

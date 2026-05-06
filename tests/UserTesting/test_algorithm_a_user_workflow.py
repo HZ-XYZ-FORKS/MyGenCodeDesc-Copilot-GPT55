@@ -1,7 +1,9 @@
 import json
 import os
+import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -10,19 +12,21 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # OVERVIEW
 # [WHAT] UserTesting for the documented Algorithm A maintainer workflow.
-# [WHERE] Root CLI `aggregateGenCodeDesc.py` using v26.03 genCodeDesc and a real local Git repository.
-# [WHY] A maintainer should be able to follow README_UserGuide without knowing an internal blame revision flag.
-# SCOPE: Covers local Git Algorithm A endTime snapshot behavior and public help surface.
-# OUT OF SCOPE: Remote auto-clone, SVN merge blame, and reference-scale performance.
+# [WHERE] Root CLI `aggregateGenCodeDesc.py` using v26.03 genCodeDesc and real local Git/SVN repositories.
+# [WHY] A maintainer should be able to follow README_UserGuide without knowing internal revision flags.
+# SCOPE: Covers local Git/SVN Algorithm A endTime snapshot behavior, Git remote preparation, shallow-history warning, and public help surface.
+# OUT OF SCOPE: SVN merge blame, hosted-provider outages, and reference-scale performance.
 #
 # USER TESTING DESIGN
 # US-UAT-001: As a codebase maintainer, I want Algorithm A to resolve the endTime repository snapshot from documented inputs, so that I can run the UserGuide workflow without `--endRev`.
 # US-UAT-002: As a codebase maintainer, I want Algorithm A to prepare a working copy for a remote Git URL when `--repoPath` is omitted, so that the documented remote workflow is usable.
 # US-UAT-003: As a codebase maintainer, I want Algorithm A to flag shallow Git history, so that I do not mistake partial blame for authoritative production output.
+# US-UAT-004: As a codebase maintainer using SVN, I want Algorithm A patch artifacts to honor `[startTime, endTime]`, so that audit output does not include outside-window revisions.
 # AC-UAT-001: GIVEN a line is introduced inside the window and deleted after endTime, WHEN the maintainer runs Algorithm A without `--endRev`, THEN the result counts the line as alive at endTime.
 # AC-UAT-002: GIVEN the maintainer asks for CLI help, WHEN the help text is printed, THEN the removed BASE option `--endRev` is not advertised.
 # AC-UAT-003: GIVEN a Git remote URL and no `--repoPath`, WHEN the maintainer runs Algorithm A, THEN the tool clones/checks out the branch and writes valid metrics.
 # AC-UAT-004: GIVEN a shallow Git working copy, WHEN the maintainer runs Algorithm A, THEN diagnostics warn that blame may be partial at the shallow boundary.
+# AC-UAT-005: GIVEN an SVN file is added inside the window and deleted after endTime, WHEN the maintainer runs Algorithm A, THEN metrics and `commitStart2EndTime.patch` use the SVN snapshot at endTime.
 #
 # TEST CASE SPECIFICATIONS
 # [@AC-UAT-001,US-UAT-001]
@@ -49,12 +53,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #    @[Purpose]: Prevents shallow history from silently looking production-authoritative.
 #    @[Brief]: Runs Algorithm A against a depth-1 Git working copy.
 #    @[Expect]: The aggregate diagnostics and stderr warn about shallow history.
+# [@AC-UAT-005,US-UAT-004]
+#  TC-UAT-005 P1 Functional / Boundary
+#    @[Name]: verifyAlgASvnWorkflow_withPostWindowDelete_expectEndTimePatchWindow
+#    @[Purpose]: Proves SVN audit artifacts and metrics are constrained to the documented measurement window.
+#    @[Brief]: Creates SVN revisions before, inside, and after the window, deletes the in-window file after endTime, and runs the root CLI.
+#    @[Expect]: The aggregate JSON counts the in-window file and the patch includes only the in-window add.
 #
 # TODO/TRACKING
 # - TC-UAT-001: TODO -> RED -> GREEN
 # - TC-UAT-002: TODO -> RED -> GREEN
 # - TC-UAT-003: TODO -> RED -> GREEN
 # - TC-UAT-004: TODO -> RED -> GREEN
+# - TC-UAT-005: TODO -> RED -> GREEN
 
 
 def _run_git(repo_path, *args, env=None):
@@ -78,7 +89,16 @@ def _commit_all(repo_path, message, timestamp):
     return _run_git(repo_path, "rev-parse", "HEAD")
 
 
-def _write_v2603_record(path, repo_url, revision_id):
+def _write_v2603_record(
+    path,
+    repo_url,
+    revision_id,
+    *,
+    vcs_type="git",
+    repo_branch="main",
+    file_name="src/main.py",
+    revision_timestamp="2026-01-10T00:00:00Z",
+):
     record = {
         "protocolName": "generatedTextDesc",
         "protocolVersion": "26.03",
@@ -93,16 +113,16 @@ def _write_v2603_record(path, repo_url, revision_id):
         },
         "DETAIL": [
             {
-                "fileName": "src/main.py",
+                "fileName": file_name,
                 "codeLines": [{"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"}],
             }
         ],
         "REPOSITORY": {
-            "vcsType": "git",
+            "vcsType": vcs_type,
             "repoURL": repo_url,
-            "repoBranch": "main",
+            "repoBranch": repo_branch,
             "revisionId": revision_id,
-            "revisionTimestamp": "2026-01-10T00:00:00Z",
+            "revisionTimestamp": revision_timestamp,
         },
     }
     path.write_text(json.dumps(record, indent=2), encoding="utf-8")
@@ -137,6 +157,26 @@ def _clone_shallow(remote_url, branch_name, clone_path):
         capture_output=True,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def _run_svn(path, *args):
+    completed = subprocess.run(["svn", *args], cwd=path, check=False, text=True, capture_output=True)
+    assert completed.returncode == 0, completed.stderr
+    return completed.stdout.strip()
+
+
+def _commit_svn(working_copy_path, message):
+    output = _run_svn(working_copy_path, "commit", "-m", message)
+    match = re.search(r"Committed revision (\d+)", output)
+    assert match is not None, output
+    return match.group(1)
+
+
+def _svn_revision_timestamp(working_copy_path, revision_id):
+    output = _run_svn(working_copy_path, "log", "--xml", "-r", revision_id, str(working_copy_path))
+    timestamp = ET.fromstring(output).findtext(".//date")
+    assert timestamp is not None
+    return timestamp
 
 
 # USER TESTING IMPLEMENTATION
@@ -300,3 +340,82 @@ def test_alg_a_shallow_git_workflow_reports_partial_blame_warning(tmp_path):
     aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert "shallow Git history" in completed.stderr
     assert any("shallow Git history" in warning for warning in aggregate["AGGREGATE"]["diagnostics"]["warnings"])
+
+
+# [@TC-UAT-005]
+# @[Name]: verifyAlgASvnWorkflow_withPostWindowDelete_expectEndTimePatchWindow
+# @[Steps]: SETUP SVN revisions around window -> BEHAVIOR run documented CLI -> VERIFY metrics and audit patch -> CLEANUP tmp_path
+def test_alg_a_svn_workflow_uses_end_time_snapshot_and_patch_window(tmp_path):
+    repository_path = tmp_path / "svn-repo"
+    working_copy_path = tmp_path / "svn-wc"
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+
+    subprocess.run(["svnadmin", "create", str(repository_path)], check=True, text=True, capture_output=True)
+    _run_svn(tmp_path, "checkout", f"file://{repository_path}", str(working_copy_path))
+
+    (working_copy_path / "src").mkdir()
+    (working_copy_path / "src" / "pre.py").write_text("before_window = True\n", encoding="utf-8")
+    _run_svn(working_copy_path, "add", "src")
+    _commit_svn(working_copy_path, "add pre-window file")
+
+    (working_copy_path / "src" / "window.py").write_text("generated = True\n", encoding="utf-8")
+    _run_svn(working_copy_path, "add", "src/window.py")
+    window_revision_id = _commit_svn(working_copy_path, "add in-window generated file")
+    window_revision_timestamp = _svn_revision_timestamp(working_copy_path, window_revision_id)
+
+    _run_svn(working_copy_path, "delete", "src/window.py")
+    (working_copy_path / "src" / "post.py").write_text("after_window = True\n", encoding="utf-8")
+    _run_svn(working_copy_path, "add", "src/post.py")
+    _commit_svn(working_copy_path, "delete window file and add post-window file")
+
+    _write_v2603_record(
+        gen_code_desc_dir / f"r{window_revision_id}.json",
+        str(working_copy_path),
+        window_revision_id,
+        vcs_type="svn",
+        repo_branch="trunk",
+        file_name="src/window.py",
+        revision_timestamp=window_revision_timestamp,
+    )
+
+    completed = _run_root_cli(
+        [
+            "--repoUrl",
+            str(working_copy_path),
+            "--repoBranch",
+            "trunk",
+            "--startTime",
+            window_revision_timestamp,
+            "--endTime",
+            window_revision_timestamp,
+            "--genCodeDescDir",
+            str(gen_code_desc_dir),
+            "--algorithm",
+            "A",
+            "--scope",
+            "A",
+            "--repoPath",
+            str(working_copy_path),
+            "--outputDir",
+            str(output_dir),
+        ]
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert {
+        "totalCodeLines": aggregate["SUMMARY"]["totalCodeLines"],
+        "weighted": aggregate["AGGREGATE"]["metrics"]["weighted"]["value"],
+        "patchContainsWindowFile": "src/window.py" in patch_text,
+        "patchContainsPreFile": "src/pre.py" in patch_text,
+        "patchContainsPostFile": "src/post.py" in patch_text,
+    } == {
+        "totalCodeLines": 1,
+        "weighted": 1.0,
+        "patchContainsWindowFile": True,
+        "patchContainsPreFile": False,
+        "patchContainsPostFile": False,
+    }
