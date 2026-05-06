@@ -108,7 +108,7 @@ def test_aggregate_gen_code_desc_py_algorithm_c_empty_window_outputs_zero_metric
     assert "200 GB" in aggregate["AGGREGATE"]["diagnostics"]["scalePolicy"]["algorithmCReferenceScale"]
 
 
-# US-008 / AC-008-4 / root CLI I/O failure with no partial output / TC-SYS-034
+# US-008 / AC-008-4, US-010 / AC-010-4 / root CLI I/O failure with no partial output / TC-SYS-034
 def test_aggregate_gen_code_desc_py_rejects_mid_stream_io_failure_with_context_and_no_partial_output(tmp_path):
     gen_code_desc_dir = tmp_path / "genCodeDesc"
     output_dir = tmp_path / "out"
@@ -121,5 +121,5 @@ def test_aggregate_gen_code_desc_py_rejects_mid_stream_io_failure_with_context_a
     assert completed.returncode == 2
     assert "unable to read genCodeDesc file" in completed.stderr
     assert "500-unreadable.json" in completed.stderr
-    assert "revisionId=<unknown>" in completed.stderr
+    assert "revisionId=500-unreadable" in completed.stderr
     _assert_no_partial_outputs(output_dir)

@@ -20,6 +20,7 @@ class AlgorithmCResult:
     input_protocol_version: str
     vcs_type: str
     diagnostics: dict[str, Any]
+    patch_text: str
 
 
 def collect_algorithm_c_lines(
@@ -29,18 +30,29 @@ def collect_algorithm_c_lines(
     start_time: str,
     end_time: str,
     scope: str,
+    on_missing: str = "abort",
+    on_duplicate: str = "reject",
+    on_clock_skew: str = "abort",
 ) -> AlgorithmCResult:
-    loaded = load_gen_code_desc_dir(gen_code_desc_dir, repo_url, repo_branch)
+    if on_missing not in {"abort", "ignore"}:
+        raise ValueError("Algorithm C onMissing must be abort or ignore")
+    if on_clock_skew not in {"abort", "ignore"}:
+        raise ValueError("onClockSkew must be abort or ignore")
+    loaded = load_gen_code_desc_dir(gen_code_desc_dir, repo_url, repo_branch, on_duplicate=on_duplicate)
     if loaded.protocol_version != "26.04":
         raise ValueError("Algorithm C requires protocolVersion 26.04 input")
-    _reject_clock_skew(loaded.records)
+    missing_revision_ids, clock_skew_detected, chain_warnings = _inspect_parent_chain(
+        loaded.records,
+        on_missing=on_missing,
+        on_clock_skew=on_clock_skew,
+    )
 
     start_dt = parse_utc_datetime(start_time)
     end_dt = parse_utc_datetime(end_time)
     surviving_lines: dict[tuple[str, str, int, str], GenerationLine] = {}
     current_positions: dict[tuple[str, str, int], tuple[str, str, int, str]] = {}
     duplicate_add_entries: list[str] = []
-    warnings = list(loaded.warnings)
+    warnings = [*loaded.warnings, *chain_warnings]
     sorted_records = sorted(
         loaded.records,
         key=lambda record: parse_utc_datetime(record["REPOSITORY"]["revisionTimestamp"]),
@@ -108,24 +120,46 @@ def collect_algorithm_c_lines(
         if start_dt <= timestamp_dt <= end_dt:
             in_window_lines.append(line)
 
+    patch_text = _build_synthetic_patch_artifact(
+        repo_url=repo_url,
+        repo_branch=repo_branch,
+        start_time=start_time,
+        end_time=end_time,
+        scope=scope,
+        lines=in_window_lines,
+    )
+
     return AlgorithmCResult(
         lines=in_window_lines,
         input_protocol_version=loaded.protocol_version,
         vcs_type=vcs_type,
         diagnostics={
-            "missingRevisions": [],
+            "missingRevisions": missing_revision_ids,
             "duplicateRevisions": [],
             "duplicateAddEntries": duplicate_add_entries,
-            "clockSkewDetected": False,
+            "clockSkewDetected": clock_skew_detected,
             "warnings": warnings,
             "scalePolicy": scale_policy(),
+            "validationPolicy": {
+                "onMissing": on_missing,
+                "onDuplicate": on_duplicate,
+                "onClockSkew": on_clock_skew,
+            },
             "recordsLoaded": loaded.record_summaries,
         },
+        patch_text=patch_text,
     )
 
 
-def _reject_clock_skew(records: list[dict[str, Any]]) -> None:
+def _inspect_parent_chain(
+    records: list[dict[str, Any]],
+    on_missing: str,
+    on_clock_skew: str,
+) -> tuple[list[str], bool, list[str]]:
     records_by_revision = {str(record["REPOSITORY"]["revisionId"]): record for record in records}
+    missing_revision_ids: set[str] = set()
+    clock_skew_detected = False
+    warnings: list[str] = []
     for record in records:
         repository = record["REPOSITORY"]
         revision_id = str(repository["revisionId"])
@@ -134,18 +168,28 @@ def _reject_clock_skew(records: list[dict[str, Any]]) -> None:
         for parent_revision_id in _parent_revision_ids(record):
             parent_record = records_by_revision.get(parent_revision_id)
             if parent_record is None:
-                raise ValueError(
+                message = (
                     "genCodeDesc chain break: "
                     f"revision {revision_id} references missing parent revision {parent_revision_id}"
                 )
+                if on_missing == "abort":
+                    raise ValueError(message)
+                missing_revision_ids.add(parent_revision_id)
+                warnings.append(f"{message} ignored by policy")
+                continue
             parent_timestamp = str(parent_record["REPOSITORY"]["revisionTimestamp"])
             parent_dt = parse_utc_datetime(parent_timestamp)
             if revision_dt < parent_dt:
-                raise ValueError(
+                message = (
                     "clock skew detected: "
                     f"revision {revision_id} revisionTimestamp {revision_timestamp} "
                     f"is earlier than parent {parent_revision_id} revisionTimestamp {parent_timestamp}"
                 )
+                if on_clock_skew == "abort":
+                    raise ValueError(message)
+                clock_skew_detected = True
+                warnings.append(f"{message}; clock skew ignored by policy")
+    return sorted(missing_revision_ids), clock_skew_detected, warnings
 
 
 def _parent_revision_ids(record: dict[str, Any]) -> list[str]:
@@ -192,3 +236,41 @@ def _find_surviving_timestamp(
                         ):
                             return blame.get("timestamp")
     return None
+
+
+def _build_synthetic_patch_artifact(
+    repo_url: str,
+    repo_branch: str,
+    start_time: str,
+    end_time: str,
+    scope: str,
+    lines: list[GenerationLine],
+) -> str:
+    parts = [
+        f"# repoURL: {repo_url}\n",
+        f"# repoBranch: {repo_branch}\n",
+        f"# startTime: {start_time}\n",
+        f"# endTime: {end_time}\n",
+        "# algorithm: C\n",
+        f"# scope: {scope}\n",
+        f"# aggregateRevisionId: aggregate:{start_time}..{end_time}\n",
+    ]
+    for file_name, file_lines in _lines_by_file(lines).items():
+        parts.extend(
+            [
+                f"diff --git a/{file_name} b/{file_name}\n",
+                "--- /dev/null\n",
+                f"+++ b/{file_name}\n",
+                f"@@ -0,0 +1,{len(file_lines)} @@\n",
+            ]
+        )
+        for line in file_lines:
+            parts.append(f"+{file_name}:{line.line_number} genRatio={line.gen_ratio} genMethod={line.gen_method}\n")
+    return "".join(parts)
+
+
+def _lines_by_file(lines: list[GenerationLine]) -> dict[str, list[GenerationLine]]:
+    file_groups: dict[str, list[GenerationLine]] = {}
+    for line in lines:
+        file_groups.setdefault(line.file_name or "<unknown>", []).append(line)
+    return {file_name: file_groups[file_name] for file_name in sorted(file_groups)}

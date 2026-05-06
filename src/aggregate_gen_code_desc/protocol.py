@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +17,8 @@ SUMMARY_KEYS = (
     "fullGeneratedDocLines",
     "partialGeneratedDocLines",
 )
+GIT_REVISION_ID = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+SVN_REVISION_ID = re.compile(r"^[rR]?[1-9][0-9]*$")
 
 
 @dataclass(frozen=True)
@@ -35,7 +39,7 @@ def load_json_file(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as error:
-        raise ValueError(f"unable to read genCodeDesc file {path}: revisionId=<unknown>: {error}") from error
+        raise ValueError(f"unable to read genCodeDesc file {path}: revisionId={path.stem}: {error}") from error
     text = strip_jsonc_comments(text)
     try:
         return json.loads(text)
@@ -91,7 +95,15 @@ def strip_jsonc_comments(text: str) -> str:
     return "".join(output)
 
 
-def load_gen_code_desc_dir(gen_code_desc_dir: Path, repo_url: str, repo_branch: str) -> LoadedRecords:
+def load_gen_code_desc_dir(
+    gen_code_desc_dir: Path,
+    repo_url: str,
+    repo_branch: str,
+    on_duplicate: str = "reject",
+) -> LoadedRecords:
+    if on_duplicate not in {"reject", "last-wins"}:
+        raise ValueError("onDuplicate must be reject or last-wins")
+
     paths = sorted(gen_code_desc_dir.glob("*.json"))
     if not paths:
         raise ValueError(f"no genCodeDesc JSON files found in {gen_code_desc_dir}")
@@ -109,7 +121,8 @@ def load_gen_code_desc_dir(gen_code_desc_dir: Path, repo_url: str, repo_branch: 
     if not protocol_version:
         raise ValueError("protocolVersion is required")
 
-    seen_revision_ids: set[str] = set()
+    records_by_revision_id: dict[str, dict[str, Any]] = {}
+    duplicate_warnings: list[str] = []
     for record in records:
         repository = record.get("REPOSITORY", {})
         if repository.get("repoURL") != repo_url:
@@ -119,14 +132,18 @@ def load_gen_code_desc_dir(gen_code_desc_dir: Path, repo_url: str, repo_branch: 
         revision_id = repository.get("revisionId")
         if not revision_id:
             raise ValueError("REPOSITORY.revisionId is required")
-        if revision_id in seen_revision_ids:
-            raise ValueError(f"duplicate revisionId: {revision_id}")
-        seen_revision_ids.add(revision_id)
+        if revision_id in records_by_revision_id:
+            if on_duplicate == "reject":
+                raise ValueError(f"duplicate revisionId: {revision_id}")
+            duplicate_warnings.append(f"duplicate revisionId {revision_id} accepted by last-wins policy")
+        records_by_revision_id[str(revision_id)] = record
+
+    records = list(records_by_revision_id.values())
 
     return LoadedRecords(
         protocol_version=protocol_version,
         records=records,
-        warnings=_summary_detail_warnings(records),
+        warnings=[*_summary_detail_warnings(records), *duplicate_warnings],
         record_summaries=[_record_summary(record) for record in records],
     )
 
@@ -144,6 +161,39 @@ def _normalize_svn_branch_path(repo_branch: str) -> str:
     return repo_branch.strip("/")
 
 
+def _parent_revision_ids(repository: dict[str, Any]) -> list[str]:
+    parent_revision_ids = repository.get("parentRevisionIds", [])
+    if isinstance(parent_revision_ids, str):
+        return [parent_revision_ids]
+    if not isinstance(parent_revision_ids, list):
+        raise ValueError("REPOSITORY.parentRevisionIds must be an array or string")
+    resolved_parent_revision_ids = []
+    for index, parent_revision_id in enumerate(parent_revision_ids):
+        if not isinstance(parent_revision_id, str) or parent_revision_id == "":
+            raise ValueError(f"REPOSITORY.parentRevisionIds[{index}] must be a string")
+        resolved_parent_revision_ids.append(parent_revision_id)
+    return resolved_parent_revision_ids
+
+
+def _validate_revision_id(revision_id: str, vcs_type: str, field_path: str) -> None:
+    if _allow_synthetic_revision_ids():
+        return
+    normalized_vcs_type = vcs_type.lower()
+    if normalized_vcs_type == "git":
+        if not GIT_REVISION_ID.fullmatch(revision_id):
+            raise ValueError(f"{field_path} must be a 40-character SHA-1 or 64-character SHA-256 hex string for git")
+        return
+    if normalized_vcs_type == "svn":
+        if not SVN_REVISION_ID.fullmatch(revision_id):
+            raise ValueError(f"{field_path} must be a positive SVN revision number")
+        return
+    raise ValueError(f"REPOSITORY.vcsType must be git or svn, got {vcs_type}")
+
+
+def _allow_synthetic_revision_ids() -> bool:
+    return os.environ.get("AGGREGATE_GCD_ALLOW_SYNTHETIC_REVISION_IDS") == "1"
+
+
 def _validate_record_schema(record: dict[str, Any], path: Path) -> None:
     if not isinstance(record, dict):
         raise ValueError(f"genCodeDesc record in {path.name} must be an object")
@@ -156,8 +206,8 @@ def _validate_record_schema(record: dict[str, Any], path: Path) -> None:
     protocol_version = _require_str(record, "protocolVersion")
     _require_str(record, "codeAgent")
     _validate_summary(_require_mapping(record, "SUMMARY"))
-    _validate_repository(_require_mapping(record, "REPOSITORY"), protocol_version)
-    _validate_detail(_require_list(record, "DETAIL"), protocol_version)
+    vcs_type = _validate_repository(_require_mapping(record, "REPOSITORY"), protocol_version)
+    _validate_detail(_require_list(record, "DETAIL"), protocol_version, vcs_type)
 
 
 def _validate_summary(summary: dict[str, Any]) -> None:
@@ -165,14 +215,20 @@ def _validate_summary(summary: dict[str, Any]) -> None:
         _require_int(summary, summary_key, f"SUMMARY.{summary_key}")
 
 
-def _validate_repository(repository: dict[str, Any], protocol_version: str) -> None:
+def _validate_repository(repository: dict[str, Any], protocol_version: str) -> str:
     for repository_key in ("vcsType", "repoURL", "repoBranch", "revisionId"):
         _require_str(repository, repository_key, f"REPOSITORY.{repository_key}")
+    vcs_type = str(repository["vcsType"])
+    _validate_revision_id(str(repository["revisionId"]), vcs_type, "REPOSITORY.revisionId")
+    if "parentRevisionIds" in repository:
+        for index, parent_revision_id in enumerate(_parent_revision_ids(repository)):
+            _validate_revision_id(parent_revision_id, vcs_type, f"REPOSITORY.parentRevisionIds[{index}]")
     if protocol_version == "26.04":
         _require_str(repository, "revisionTimestamp", "REPOSITORY.revisionTimestamp")
+    return vcs_type
 
 
-def _validate_detail(detail: list[Any], protocol_version: str) -> None:
+def _validate_detail(detail: list[Any], protocol_version: str, vcs_type: str) -> None:
     for file_index, file_detail in enumerate(detail):
         file_path = f"DETAIL[{file_index}]"
         if not isinstance(file_detail, dict):
@@ -184,26 +240,26 @@ def _validate_detail(detail: list[Any], protocol_version: str) -> None:
             collection = _require_list(file_detail, collection_name, f"{file_path}.{collection_name}")
             for entry_index, entry in enumerate(collection):
                 entry_path = f"{file_path}.{collection_name}[{entry_index}]"
-                _validate_detail_entry(entry, entry_path, protocol_version)
+                _validate_detail_entry(entry, entry_path, protocol_version, vcs_type)
 
 
-def _validate_detail_entry(entry: Any, entry_path: str, protocol_version: str) -> None:
+def _validate_detail_entry(entry: Any, entry_path: str, protocol_version: str, vcs_type: str) -> None:
     if not isinstance(entry, dict):
         raise ValueError(f"{entry_path} must be an object")
     if protocol_version == "26.04":
-        _validate_v2604_detail_entry(entry, entry_path)
+        _validate_v2604_detail_entry(entry, entry_path, vcs_type)
         return
     _validate_line_selector(entry, entry_path)
     _require_field(entry, "genRatio", f"{entry_path}.genRatio")
     _require_str(entry, "genMethod", f"{entry_path}.genMethod")
 
 
-def _validate_v2604_detail_entry(entry: dict[str, Any], entry_path: str) -> None:
+def _validate_v2604_detail_entry(entry: dict[str, Any], entry_path: str, vcs_type: str) -> None:
     change_type = _require_str(entry, "changeType", f"{entry_path}.changeType")
     if change_type not in {"add", "delete"}:
         raise ValueError(f"{entry_path}.changeType must be add or delete")
     blame = _require_mapping(entry, "blame", f"{entry_path}.blame")
-    _require_str(blame, "revisionId", f"{entry_path}.blame.revisionId")
+    _validate_revision_id(_require_str(blame, "revisionId", f"{entry_path}.blame.revisionId"), vcs_type, f"{entry_path}.blame.revisionId")
     _require_str(blame, "originalFilePath", f"{entry_path}.blame.originalFilePath")
     _validate_original_line_selector(blame, f"{entry_path}.blame")
     if change_type == "add":

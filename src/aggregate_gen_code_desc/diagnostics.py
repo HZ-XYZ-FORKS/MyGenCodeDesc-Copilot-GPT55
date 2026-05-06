@@ -6,6 +6,13 @@ from typing import TextIO
 
 
 LOG_LEVELS = {"DEBUG": 10, "INFO": 20, "WARN": 30, "ERROR": 40}
+LOG_LEVEL_ALIASES = {
+    "DEBUG": "DEBUG",
+    "INFO": "INFO",
+    "WARN": "WARN",
+    "WARNING": "WARN",
+    "ERROR": "ERROR",
+}
 
 
 class Logger:
@@ -58,7 +65,7 @@ def scale_policy() -> dict[str, str]:
 
 
 def _normalize_level(level: str) -> str:
-    normalized = level.upper()
-    if normalized not in LOG_LEVELS:
-        raise ValueError(f"logLevel must be one of {', '.join(LOG_LEVELS)}")
+    normalized = LOG_LEVEL_ALIASES.get(level.upper())
+    if normalized is None:
+        raise ValueError("logLevel must be one of Debug, Info, Warning, Error")
     return normalized

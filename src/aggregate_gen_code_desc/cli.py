@@ -26,7 +26,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repoPath")
     parser.add_argument("--endRev", default="HEAD")
     parser.add_argument("--commitPatchDir")
-    parser.add_argument("--logLevel", choices=["DEBUG", "INFO", "WARN", "ERROR"], default="INFO")
+    parser.add_argument("--blameWhitespace", choices=["respect", "ignore"], default="respect")
+    parser.add_argument("--renameDetection", choices=["off", "basic", "aggressive"], default="basic")
+    parser.add_argument("--onMissing", choices=["abort", "zero", "skip", "ignore"])
+    parser.add_argument("--onDuplicate", choices=["reject", "last-wins"], default="reject")
+    parser.add_argument("--onClockSkew", choices=["abort", "ignore"], default="abort")
+    parser.add_argument(
+        "--logLevel",
+        choices=["Debug", "Info", "Warning", "Error", "DEBUG", "INFO", "WARN", "WARNING", "ERROR"],
+        default="Info",
+    )
     parser.add_argument("--outputDir", default=".")
     return parser
 
@@ -48,6 +57,10 @@ def main(argv: list[str] | None = None) -> int:
                 start_time=args.startTime,
                 end_time=args.endTime,
                 scope=args.scope,
+                on_missing=args.onMissing or "zero",
+                on_duplicate=args.onDuplicate,
+                blame_whitespace=args.blameWhitespace,
+                rename_detection=args.renameDetection,
             )
         elif args.algorithm == "C":
             algorithm_result = collect_algorithm_c_lines(
@@ -57,6 +70,9 @@ def main(argv: list[str] | None = None) -> int:
                 start_time=args.startTime,
                 end_time=args.endTime,
                 scope=args.scope,
+                on_missing=args.onMissing or "abort",
+                on_duplicate=args.onDuplicate,
+                on_clock_skew=args.onClockSkew,
             )
         else:
             if args.commitPatchDir is None:
@@ -69,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
                 start_time=args.startTime,
                 end_time=args.endTime,
                 scope=args.scope,
+                on_missing=args.onMissing or "zero",
+                on_duplicate=args.onDuplicate,
             )
         _emit_load_logs(logger, algorithm_result.diagnostics)
         metrics = calculate_metrics(algorithm_result.lines, threshold=args.threshold)

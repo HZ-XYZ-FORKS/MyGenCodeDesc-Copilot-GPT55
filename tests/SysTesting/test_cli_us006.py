@@ -197,31 +197,35 @@ def _run_algorithm_c(gen_code_desc_dir, output_dir, repo_url="https://example.te
     )
 
 
-def _run_algorithm_b(gen_code_desc_dir, commit_patch_dir, output_dir):
+def _run_algorithm_b(gen_code_desc_dir, commit_patch_dir, output_dir, extra_args=None):
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+    args = [
+        sys.executable,
+        str(REPO_ROOT / "aggregateGenCodeDesc.py"),
+        "--repoUrl",
+        "https://example.test/repo",
+        "--repoBranch",
+        "main",
+        "--startTime",
+        "2026-01-01T00:00:00Z",
+        "--endTime",
+        "2026-01-31T00:00:00Z",
+        "--genCodeDescDir",
+        str(gen_code_desc_dir),
+        "--algorithm",
+        "B",
+        "--scope",
+        "A",
+        "--commitPatchDir",
+        str(commit_patch_dir),
+        "--outputDir",
+        str(output_dir),
+    ]
+    if extra_args is not None:
+        args.extend(extra_args)
+
     return subprocess.run(
-        [
-            sys.executable,
-            str(REPO_ROOT / "aggregateGenCodeDesc.py"),
-            "--repoUrl",
-            "https://example.test/repo",
-            "--repoBranch",
-            "main",
-            "--startTime",
-            "2026-01-01T00:00:00Z",
-            "--endTime",
-            "2026-01-31T00:00:00Z",
-            "--genCodeDescDir",
-            str(gen_code_desc_dir),
-            "--algorithm",
-            "B",
-            "--scope",
-            "A",
-            "--commitPatchDir",
-            str(commit_patch_dir),
-            "--outputDir",
-            str(output_dir),
-        ],
+        args,
         check=False,
         env=env,
         text=True,
@@ -300,6 +304,24 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_missing_gen_code_desc_pa
     assert aggregate["AGGREGATE"]["diagnostics"]["missingRevisions"] == ["c5"]
 
 
+# US-006 / AC-006-1 / missing genCodeDesc abort policy / TC-SYS-043
+def test_aggregate_gen_code_desc_py_algorithm_b_aborts_missing_gen_code_desc_when_policy_requires(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    commit_patch_dir = tmp_path / "patches"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    commit_patch_dir.mkdir()
+    _write_record(gen_code_desc_dir / "c1.json", _v2603_record())
+    _write_add_file_patch(commit_patch_dir / "c1.patch")
+    _write_missing_record_patch(commit_patch_dir / "c5.patch")
+
+    completed = _run_algorithm_b(gen_code_desc_dir, commit_patch_dir, output_dir, extra_args=["--onMissing", "abort"])
+
+    assert completed.returncode == 2
+    assert "missing genCodeDesc records for patch revisions: c5" in completed.stderr
+    _assert_no_partial_outputs(output_dir)
+
+
 # US-006 / AC-006-1 / missing per-revision genCodeDesc for Algorithm A / TC-SYS-037
 def test_aggregate_gen_code_desc_py_algorithm_a_marks_missing_live_blame_revision_as_manual(tmp_path):
     repo_path = tmp_path / "repo"
@@ -331,6 +353,9 @@ def test_aggregate_gen_code_desc_py_algorithm_a_marks_missing_live_blame_revisio
     assert aggregate["DETAIL"] == [
         {"fileName": "src/main.py", "codeLines": [{"lineLocation": 1, "genRatio": 100, "genMethod": "codeCompletion"}]}
     ]
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert "# algorithm: A" in patch_text
+    assert "diff --git" in patch_text
 
 
 # US-006 / AC-006-1 / missing genCodeDesc input / TC-SYS-013
@@ -395,6 +420,27 @@ def test_aggregate_gen_code_desc_py_rejects_duplicate_revision_ids(tmp_path):
     _assert_no_partial_outputs(output_dir)
 
 
+# US-006 / AC-006-3 / duplicate revisionId last-wins policy / TC-SYS-044
+def test_aggregate_gen_code_desc_py_accepts_duplicate_revision_ids_with_last_wins_warning(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    _write_record(gen_code_desc_dir / "first.json", _v2604_record(revision_id="abc123", gen_ratio=100))
+    _write_record(gen_code_desc_dir / "second.json", _v2604_record(revision_id="abc123", gen_ratio=40))
+
+    completed = _run_algorithm_c(
+        gen_code_desc_dir,
+        output_dir,
+        extra_args=["--onDuplicate", "last-wins", "--logLevel", "Warning"],
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "duplicate revisionId abc123 accepted by last-wins policy" in completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
+    assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.4
+
+
 # US-006 / AC-006-5 / invalid genRatio / TC-SYS-017
 def test_aggregate_gen_code_desc_py_rejects_gen_ratio_outside_valid_range(tmp_path):
     gen_code_desc_dir = tmp_path / "genCodeDesc"
@@ -455,6 +501,22 @@ def test_aggregate_gen_code_desc_py_rejects_invalid_summary_count_type_with_no_p
     assert completed.returncode == 2
     assert "SUMMARY.totalCodeLines must be an integer" in completed.stderr
     _assert_no_partial_outputs(output_dir)
+
+
+# US-006 / AC-006-6 / optional UserGuide policy flags / TC-SYS-045
+def test_aggregate_gen_code_desc_py_help_exposes_userguide_policy_flags():
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+    completed = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "aggregateGenCodeDesc.py"), "--help"],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0
+    for flag_name in ["--blameWhitespace", "--renameDetection", "--onMissing", "--onDuplicate", "--onClockSkew"]:
+        assert flag_name in completed.stdout
 
 
 # US-006 / AC-006-1 / Algorithm C missing genCodeDesc chain break / TC-SYS-030
@@ -526,6 +588,37 @@ def test_aggregate_gen_code_desc_py_logs_error_and_rejects_algorithm_c_clock_ske
     assert "child" in completed.stderr
     assert "parent" in completed.stderr
     _assert_no_partial_outputs(output_dir)
+
+
+# US-006 / AC-006-4 / clock skew ignore policy / TC-SYS-046
+def test_aggregate_gen_code_desc_py_warns_and_continues_when_clock_skew_policy_ignores(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    _write_record(gen_code_desc_dir / "parent.json", _v2604_record(revision_id="parent", revision_timestamp="2026-01-03T00:00:00Z"))
+    _write_record(
+        gen_code_desc_dir / "child.json",
+        _v2604_record(
+            revision_id="child",
+            revision_timestamp="2026-01-02T00:00:00Z",
+            parent_revision_ids=["parent"],
+            gen_ratio=40,
+        ),
+    )
+
+    completed = _run_algorithm_c(
+        gen_code_desc_dir,
+        output_dir,
+        extra_args=["--onClockSkew", "ignore", "--logLevel", "Warning"],
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "clock skew ignored by policy" in completed.stderr
+    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    assert aggregate["AGGREGATE"]["diagnostics"]["clockSkewDetected"] is True
+    patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
+    assert "# algorithm: C" in patch_text
+    assert "+src/auth.py:1" in patch_text
 
 
 # US-010 / AC-010-5 / log-level filtering / TC-SYS-019

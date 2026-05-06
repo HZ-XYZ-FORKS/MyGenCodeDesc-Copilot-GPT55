@@ -105,6 +105,27 @@ def test_algorithm_a_blame_command_enables_rename_detection(monkeypatch, tmp_pat
     assert blame_lines[0].original_line == 10
 
 
+# US-004 / AC-004-3, US-009 / AC-009-1 / Algorithm A configurable blame policy / TC-UNIT-051
+def test_algorithm_a_blame_command_respects_userguide_detection_flags(monkeypatch, tmp_path):
+    captured_calls = []
+
+    def fake_run_git(repo_path, *args):
+        captured_calls.append((repo_path, args))
+        return "abcdef1234567890 1 1 1\nauthor-time 1768003200\nfilename app.py\n\tline"
+
+    monkeypatch.setattr(algorithm_a, "_run_git", fake_run_git)
+
+    algorithm_a._git_blame_lines(tmp_path, "HEAD", "app.py", blame_whitespace="ignore", rename_detection="off")
+    algorithm_a._git_blame_lines(tmp_path, "HEAD", "app.py", blame_whitespace="respect", rename_detection="basic")
+    algorithm_a._git_blame_lines(tmp_path, "HEAD", "app.py", blame_whitespace="respect", rename_detection="aggressive")
+
+    assert captured_calls == [
+        (tmp_path, ("blame", "-w", "--line-porcelain", "HEAD", "--", "app.py")),
+        (tmp_path, ("blame", "-M", "--line-porcelain", "HEAD", "--", "app.py")),
+        (tmp_path, ("blame", "-M", "-C", "-C", "--line-porcelain", "HEAD", "--", "app.py")),
+    ]
+
+
 # US-009 / AC-009-2 / Algorithm A cross-file move blame / TC-UNIT-042
 def test_algorithm_a_uses_copy_detection_for_cross_file_moved_lines(tmp_path):
     repo_path = tmp_path / "repo"

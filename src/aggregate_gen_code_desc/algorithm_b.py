@@ -31,15 +31,21 @@ def collect_algorithm_b_lines(
     start_time: str,
     end_time: str,
     scope: str,
+    on_missing: str = "zero",
+    on_duplicate: str = "reject",
 ) -> AlgorithmBResult:
+    if on_missing not in {"abort", "zero", "skip"}:
+        raise ValueError("Algorithm B onMissing must be abort, zero, or skip")
     if not commit_patch_dir.is_dir():
         raise ValueError(f"commit patch dir not found: {commit_patch_dir}")
 
-    loaded = load_gen_code_desc_dir(gen_code_desc_dir, repo_url, repo_branch)
+    loaded = load_gen_code_desc_dir(gen_code_desc_dir, repo_url, repo_branch, on_duplicate=on_duplicate)
     if loaded.protocol_version != "26.03":
         raise ValueError("Algorithm B requires protocolVersion 26.03 input")
 
     replay_records, orphaned_revision_ids, missing_revision_ids = _records_in_patch_history(loaded.records, commit_patch_dir)
+    if missing_revision_ids and on_missing == "abort":
+        raise ValueError(f"missing genCodeDesc records for patch revisions: {', '.join(missing_revision_ids)}")
     if not replay_records and not missing_revision_ids:
         raise ValueError("no genCodeDesc records match commitPatchDir patch history")
 
@@ -73,6 +79,8 @@ def collect_algorithm_b_lines(
             patch_sections.append((revision_id, patch_path.read_text(encoding="utf-8")))
 
     for revision_id in missing_revision_ids:
+        if on_missing == "skip":
+            continue
         revision_timestamp = start_time
         patch_path = commit_patch_dir / f"{revision_id}.patch"
         attribution_indexes[revision_id] = {}
@@ -92,6 +100,8 @@ def collect_algorithm_b_lines(
         start_time=start_time,
         end_time=end_time,
         scope=scope,
+        missing_revision_ids=set(missing_revision_ids),
+        on_missing=on_missing,
     )
 
     vcs_source_record = replay_records[-1] if replay_records else loaded.records[-1]
@@ -121,6 +131,7 @@ def collect_algorithm_b_lines(
             "historyPolicy": _history_policy(),
             "vcsPolicy": vcs_policy,
             "scalePolicy": scale_policy(),
+            "validationPolicy": {"onMissing": on_missing, "onDuplicate": on_duplicate},
             "processDetails": process_details,
             "recordsLoaded": [summary for summary in loaded.record_summaries if summary["revisionId"] in replay_revision_ids],
         },
@@ -491,6 +502,8 @@ def _collect_surviving_lines(
     start_time: str,
     end_time: str,
     scope: str,
+    missing_revision_ids: set[str] | None = None,
+    on_missing: str = "zero",
 ) -> tuple[list[GenerationLine], list[str]]:
     start_dt = parse_utc_datetime(start_time)
     end_dt = parse_utc_datetime(end_time)
@@ -504,6 +517,8 @@ def _collect_surviving_lines(
 
         for line_number, origin in enumerate(snapshot[file_name], start=1):
             if origin.origin_revision_id is None or origin.origin_timestamp is None:
+                continue
+            if on_missing == "skip" and missing_revision_ids is not None and origin.origin_revision_id in missing_revision_ids:
                 continue
             origin_timestamp = revision_timestamps.get(origin.origin_revision_id, origin.origin_timestamp)
             origin_dt = parse_utc_datetime(origin_timestamp)

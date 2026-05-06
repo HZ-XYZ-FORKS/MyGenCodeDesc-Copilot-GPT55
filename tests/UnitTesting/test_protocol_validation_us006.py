@@ -106,3 +106,39 @@ def test_loader_rejects_v2604_add_entry_without_blame_timestamp(tmp_path):
 
     with pytest.raises(ValueError, match=r"DETAIL\[0\]\.codeLines\[0\]\.blame\.timestamp is required"):
         _load(record, tmp_path)
+
+
+# US-007 / malformed Git revision ID strict validation / TC-UNIT-053
+def test_loader_rejects_malformed_git_revision_id_when_strict_policy_is_enabled(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGGREGATE_GCD_ALLOW_SYNTHETIC_REVISION_IDS", raising=False)
+    record = _valid_record(protocol_version="26.03")
+    record["REPOSITORY"]["revisionId"] = "abc123"
+
+    with pytest.raises(ValueError, match=r"REPOSITORY\.revisionId must be a 40-character SHA-1 or 64-character SHA-256 hex string"):
+        _load(record, tmp_path)
+
+
+# US-007 / malformed SVN revision ID strict validation / TC-UNIT-054
+def test_loader_rejects_malformed_svn_revision_id_when_strict_policy_is_enabled(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGGREGATE_GCD_ALLOW_SYNTHETIC_REVISION_IDS", raising=False)
+    record = _valid_record(protocol_version="26.03")
+    record["REPOSITORY"]["vcsType"] = "svn"
+    record["REPOSITORY"]["revisionId"] = "abc123"
+
+    with pytest.raises(ValueError, match=r"REPOSITORY\.revisionId must be a positive SVN revision number"):
+        _load(record, tmp_path)
+
+
+# US-007 / malformed embedded blame revision ID strict validation / TC-UNIT-055
+def test_loader_rejects_malformed_v2604_blame_revision_id_when_strict_policy_is_enabled(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGGREGATE_GCD_ALLOW_SYNTHETIC_REVISION_IDS", raising=False)
+    record = _valid_record(protocol_version="26.04")
+    valid_git_revision = "a" * 40
+    record["REPOSITORY"]["revisionId"] = valid_git_revision
+    record["DETAIL"][0]["codeLines"][0]["blame"]["revisionId"] = "bad-blame-id"
+
+    with pytest.raises(
+        ValueError,
+        match=r"DETAIL\[0\]\.codeLines\[0\]\.blame\.revisionId must be a 40-character SHA-1 or 64-character SHA-256 hex string",
+    ):
+        _load(record, tmp_path)
