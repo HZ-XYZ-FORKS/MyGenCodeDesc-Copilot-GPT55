@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This test verifies package-level Algorithm B behavior for US-005 branch and history conditions. It focuses on synthetic offline patch replay for time-window filtering, multiple merge uniqueness, long-lived branch origins, shallow-history limitation documentation, and submodule exclusion policy.
+This test verifies package-level Algorithm B behavior for US-005 branch and history conditions. It focuses on synthetic offline patch replay for time-window filtering, multiple merge uniqueness, long-lived branch origins, shallow-history and replay-context limitation documentation, and submodule exclusion policy.
 
 ## Status
 
@@ -13,7 +13,7 @@ Implemented / Passing
 - US-005 / AC-005-1: surviving lines whose origin timestamp is before `startTime` are excluded.
 - US-005 / AC-005-2: multiple merged branches contribute distinct live lines exactly once.
 - US-005 / AC-005-3: long-lived branch fixtures include in-window feature origins and exclude old base origins.
-- US-005 / AC-005-4: Algorithm B reports a shallow-history limitation policy.
+- US-005 / AC-005-4: Algorithm B reports shallow-history and replay-context limitation policies.
 - US-005 / AC-005-5: submodule gitlink patches contribute no parent-repo lines and require an independent run.
 
 ## Manual

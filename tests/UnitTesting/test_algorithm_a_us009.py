@@ -1,11 +1,12 @@
 import json
 import os
 import subprocess
+from datetime import datetime, timezone
 
 import pytest
 
 from aggregate_gen_code_desc import algorithm_a
-from aggregate_gen_code_desc.algorithm_a import collect_algorithm_a_lines
+from aggregate_gen_code_desc.algorithm_a import BlameLine, collect_algorithm_a_lines
 
 
 def _run_git(repo_path, *args, env=None):
@@ -83,6 +84,56 @@ def _record(repo_url, revision_id, revision_timestamp, file_name, line_count, ge
 
 def _line_summary(result):
     return [(line.file_name, line.line_number, line.gen_ratio, line.gen_method) for line in result.lines]
+
+
+# US-009 / Algorithm A origin-coordinate join contract / TC-UNIT-052
+def test_algorithm_a_joins_v2603_detail_by_blame_origin_coordinates(monkeypatch, tmp_path):
+    revision_id = "abcdef1234567890"
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    gen_code_desc_dir.mkdir()
+    _write_record(
+        gen_code_desc_dir / "origin.json",
+        _record(str(tmp_path / "repo"), revision_id, "2026-01-10T00:00:00Z", "src/a.py", 2, 100),
+    )
+
+    monkeypatch.setattr(algorithm_a, "_list_scoped_files", lambda *_args: [("src/math_utils.py", "code")])
+    monkeypatch.setattr(
+        algorithm_a,
+        "_blame_lines",
+        lambda *_args: [
+            BlameLine(
+                revision_id=revision_id,
+                original_file_path="src/a.py",
+                original_line=2,
+                current_file_path="src/math_utils.py",
+                current_line=4,
+                timestamp=datetime(2026, 1, 10, tzinfo=timezone.utc),
+            )
+        ],
+    )
+    monkeypatch.setattr(algorithm_a, "_build_git_patch_artifact", lambda *_args: "")
+
+    result = collect_algorithm_a_lines(
+        gen_code_desc_dir=gen_code_desc_dir,
+        repo_url=str(tmp_path / "repo"),
+        repo_branch="main",
+        repo_path=tmp_path / "repo",
+        end_rev="HEAD",
+        start_time="2026-01-01T00:00:00Z",
+        end_time="2026-01-31T00:00:00Z",
+        scope="A",
+    )
+
+    assert _line_summary(result) == [("src/math_utils.py", 4, 100, "codeCompletion")]
+    assert result.diagnostics["processDetails"] == [
+        f"algorithm=A file=src/math_utils.py line=4 state=BLAME origin={revision_id} original=src/a.py:2 genRatio=100 method=codeCompletion"
+    ]
+
+
+# US-009 / Algorithm A origin-coordinate policy diagnostics / TC-UNIT-053
+def test_algorithm_a_policy_documents_origin_coordinate_join():
+    assert "origin file path" in algorithm_a.algorithm_a_policy()["originCoordinateJoin"]
+    assert "current endTime" in algorithm_a.algorithm_a_policy()["originCoordinateJoin"]
 
 
 # US-009 / AC-009-1 / Algorithm A rename blame command / TC-UNIT-041

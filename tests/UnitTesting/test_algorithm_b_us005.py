@@ -164,7 +164,7 @@ def test_algorithm_b_long_lived_branch_includes_feature_origin_and_excludes_old_
     assert _line_summary(result) == [("src/feature.py", 1, 80, "vibeCoding")]
 
 
-# US-005 / AC-005-4 / shallow history limitation policy / TC-UNIT-035
+# US-005 / AC-005-4 / shallow history and replay context limitation policy / TC-UNIT-035
 def test_algorithm_b_reports_shallow_history_limitation_policy(tmp_path):
     gen_code_desc_dir = tmp_path / "genCodeDesc"
     commit_patch_dir = tmp_path / "patches"
@@ -176,6 +176,8 @@ def test_algorithm_b_reports_shallow_history_limitation_policy(tmp_path):
     result = _collect(gen_code_desc_dir, commit_patch_dir)
 
     assert "shallow" in result.diagnostics["historyPolicy"]["shallowHistory"]
+    assert "replay context" in result.diagnostics["historyPolicy"]["replayContext"]
+    assert "unchanged pre-window lines" in result.diagnostics["historyPolicy"]["replayContext"]
 
 
 # US-005 / AC-005-5 / submodule parent exclusion policy / TC-UNIT-036

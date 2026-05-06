@@ -130,6 +130,7 @@ def algorithm_a_policy() -> dict[str, str]:
     return {
         "renameDetection": "Algorithm A invokes git blame with -M so intra-file moved or renamed content can retain original attribution when Git can detect it",
         "copyMoveDetection": "Algorithm A invokes git blame with -C -C so cross-file moved or copied code can retain original attribution; this improves correctness but increases blame runtime on large histories",
+        "originCoordinateJoin": "Algorithm A joins v26.03 DETAIL by blame origin file path and origin line, not by the current endTime file path and line number",
         "vcsFailure": "Algorithm A requires local VCS access and aborts before output when Git commands fail; retry after VCS recovery or use Algorithm C when embedded blame is available",
     }
 

@@ -187,6 +187,7 @@ def _history_policy() -> dict[str, str]:
         "multipleMerges": "Algorithm B replays to a single final snapshot, so each live path/line position contributes at most once",
         "longLivedBranches": "parentRevisionIds order replay before timestamp filtering so old base origins can be excluded while in-window branch origins remain",
         "shallowHistory": "shallow or incomplete patch history limits Algorithm B accuracy; provide complete commitPatchDir history for authoritative replay",
+        "replayContext": "Algorithm B requires enough patch order metadata and replay context to apply the selected patch chain deterministically; unchanged pre-window lines remain outside the metric denominator unless a replayed patch modifies them",
         "missingGenCodeDesc": "patch revisions without genCodeDesc are replayed with Manual attribution and listed in missingRevisions",
         "submodules": "git submodule gitlink patches contain no parent-repo lines; run an independent aggregateGenCodeDesc run for each submodule repository",
     }

@@ -6,6 +6,12 @@
 
 > 对于 `endTime` 逻辑仓库快照中仍然存活、且当前文本形态由 `[startTime, endTime]` 内某个版本时间戳引入的范围内代码行或文档行，有多大比例归功于 AI？
 
+等价地，在范围过滤之后，被度量的集合是：
+
+```text
+(startTime..endTime diff lines) ∩ (lines alive at endTime)
+```
+
 三种算法的区别只在于**怎么发现行的来源**，不是度量对象不同。范围选择决定结果是只统计代码、只统计文档，还是两者都统计；行来源规则保持一致。
 
 ---
@@ -15,7 +21,7 @@
 | | **算法 A** | **算法 B** | **算法 C** |
 | --- | --- | --- | --- |
 | **核心手段** | 在 `endTime` 实时跑 VCS blame | 按顺序离线回放 diff | genCodeDesc 里内嵌 VCS blame |
-| **运行时要不要访问仓库** | 跑 blame 需要 | 如果已提供有序 patch 和顺序元数据，则不需要 | 不需要 |
+| **运行时要不要访问仓库** | 跑 blame 需要 | 有序 patch 和顺序元数据导出后不需要 | 不需要 |
 | **用的 genCodeDesc 版本** | v26.03 | v26.03 | v26.04 |
 | **需不需要逐提交的 diff 补丁** | 不需要 | 需要 | 不需要 |
 | **处理顺序权威来源** | `endTime` 的活快照 | VCS 历史顺序 | `REPOSITORY.revisionTimestamp` |
@@ -28,7 +34,19 @@
 
 ### A：它是什么
 
-算法 A 是**首选的、生产质量的基线方案**。它从 `endTime` 时刻的活文件快照出发，对每一条存活的范围内行运行 `git blame` 或 `svn blame`，用 blame 结果发现哪个版本最后引入了这行的当前文本形态。来源版本时间戳落在 `[startTime, endTime]` 窗口里的行会被计入。对每条计入的行，算法去匹配的逐版本 genCodeDesc v26.03 记录里查 `genRatio`；如果稀疏的 v26.03 `DETAIL` 没有匹配的行条目，则这行按人写/未归因处理，有效 `genRatio=0`。
+算法 A 是**首选的、生产质量的基线方案**。它从 `endTime` 时刻的活文件快照出发，对每一条存活的范围内行运行 `git blame` 或 `svn blame`，用 blame 结果发现哪个版本最后引入了这行的当前文本形态。来源版本时间戳落在 `[startTime, endTime]` 窗口里的行会被计入。
+
+对每条计入的行，算法 A 会把 blame 结果 join 到匹配的逐版本 genCodeDesc v26.03 记录。查找时应该使用 blame 给出的**来源坐标**，而不是直接拿 `endTime` 时的当前文件路径和当前行号去查。因为一行被引入之后，后续可能经历改名，或因为附近插入/删除而漂移到不同的当前行号；但 v26.03 记录描述的是来源版本当时的文件和行位置。
+
+单条活行的 join 契约：
+
+```text
+endTime 的活行
+  -> blame 给出来源 revisionId + 来源文件路径 + 来源行/行范围 + 来源时间戳
+  -> 如果来源时间戳在 [startTime, endTime] 内，加载该来源 revisionId 的 genCodeDescV26.03
+  -> 用来源文件路径 + 来源行/行范围查 DETAIL
+  -> 使用 genRatio/genMethod；如果稀疏 v26.03 没有匹配条目，则有效 genRatio=0
+```
 
 ### A：流程图
 
@@ -39,7 +57,7 @@ flowchart TD
   A3["对存活的范围内行运行 git blame 或 svn blame"]
   A4{"来源时间戳在 [startTime, endTime] 内?"}
   A5["按来源版本找到 v26.03 genCodeDesc 记录"]
-  A6{"DETAIL 有匹配的 lineLocation 或 lineRange?"}
+  A6{"DETAIL 匹配来源文件路径 + 来源行/行范围?"}
   A7["使用记录的 genRatio 和 genMethod"]
   A8["按人写/未归因处理, genRatio=0"]
   A9["汇总 Weighted、Fully AI、Mostly AI 指标"]
@@ -51,6 +69,103 @@ flowchart TD
   A6 -- "是" --> A7 --> A9
   A6 -- "否" --> A8 --> A9
 ```
+
+### A：典型走读例子
+
+理解算法 A 时，可以把它看成**先看活行，而不是先看提交**：先检查 `endTime` 的活快照，对每条活行询问 blame 它来自哪里，再把这个来源 join 到 genCodeDesc。
+
+#### 例 1：只新增一行
+
+窗口前的 `C0` 有：
+
+```python
+def total(items):
+    return sum(items)
+```
+
+`C1` 在 `[startTime, endTime]` 内新增一条仍然存活的行：
+
+```python
+def total(items):
+    return sum(items)
+
+print(total([1, 2, 3]))
+```
+
+`endTime` 的 blame：
+
+```text
+C0  src/a.py:1  def total(items):
+C0  src/a.py:2      return sum(items)
+C1  src/a.py:4  print(total([1, 2, 3]))
+```
+
+算法 A 只保留 `C1` 这一行，加载 `genCodeDescV26.03(C1)`，查 `src/a.py:4`，并使用该条目的 `genRatio`。分母是 `1`。
+
+#### 例 2：修改已有行
+
+`C0` 写了：
+
+```python
+def total(items):
+    return sum(items)
+```
+
+`C1` 在窗口内改写第 2 行：
+
+```python
+def total(items):
+    return sum(items or [])
+```
+
+`endTime` 的 blame：
+
+```text
+C0  src/a.py:1  def total(items):
+C1  src/a.py:2      return sum(items or [])
+```
+
+算法 A 统计当前第 2 行，并查 `genCodeDescV26.03(C1) -> src/a.py:2`。旧的 `C0` 文本已经不存活，所以旧行不参与度量。
+
+#### 例 3：纯改名
+
+`C1` 在窗口内把 `old.py` 改名成 `new.py`，但没有修改文本。
+
+`endTime` 的 blame 通常会穿透改名：
+
+```text
+C0  origin old.py:1  current new.py:1  def total(items):
+C0  origin old.py:2  current new.py:2      return sum(items)
+```
+
+算法 A 看到这些行的来源仍然是 `C0`，不是 `C1`，所以 `C1` 对分母贡献 `0` 行。只改路径不是新的行内容来源。
+
+#### 例 4：当前位置不同于来源位置
+
+`C1` 在窗口内创建 `src/a.py`：
+
+```python
+def total(items):          # C1 line 1
+    return sum(items)      # C1 line 2, genRatio=100
+```
+
+之后，在 `endTime` 之前，`C2` 改名文件并插入 header：
+
+```python
+# math helpers             # current line 1
+
+def total(items):          # current line 3
+    return sum(items)      # current line 4
+```
+
+当前第 4 行的 blame 应该仍然指回 `C1` 的来源行：
+
+```text
+current src/math_utils.py:4
+  -> origin revision C1, origin file src/a.py, origin line 2
+```
+
+算法 A 必须查 `genCodeDescV26.03(C1) -> src/a.py:2`，而不是 `src/math_utils.py:4`。这就是为什么 blame 的来源坐标很重要。
 
 ### A：为什么它行
 
@@ -64,6 +179,7 @@ flowchart TD
 - 需要**活的仓库访问**——运行时必须有本地检出或等价工作副本。
 - 在**非常大的仓库**里 blame 性能可能很慢，文件多、文件大的时候尤其明显。
 - 正确性取决于 VCS blame 的质量——SVN 碰上复杂的 mergeinfo 可能返回不精确的结果。
+- 实现必须用能暴露或重建足够来源坐标的 blame 模式来查 v26.03。如果只有当前文件路径和当前行号，改名和行号漂移场景可能 join 错。
 - 要得到精确归因，每个被计入的来源版本都必须有对应的 v26.03 记录；否则按配置的缺失记录策略处理。
 
 ---
@@ -72,7 +188,7 @@ flowchart TD
 
 ### B：它是什么
 
-算法 B 从 `--commitPatchDir` 回放一组按顺序排列的**逐版本 unified-diff patch**，增量式地重建行所有权。它不问 VCS“谁最后改了这一行？”，而是按 VCS 历史顺序模拟历史，打 diff 并追踪哪个版本引入了每一条存活行。知道存活行的来源版本后，算法去匹配的 v26.03 genCodeDesc 记录里查 `genRatio`；如果稀疏的 v26.03 `DETAIL` 没有匹配的行条目，则这行按人写/未归因处理，有效 `genRatio=0`。运行时**不需要实时 blame**；要完全离线运行，必须预先导出 patch 文件和提交/版本顺序元数据。
+算法 B 从 `--commitPatchDir` 回放一组按顺序排列的**逐版本 unified-diff patch**，增量式地重建行所有权。它不问 VCS“谁最后改了这一行？”，而是按 VCS 历史顺序模拟历史，打 diff 并追踪哪个版本引入了每一条存活行。知道存活行的来源版本后，算法去匹配的 v26.03 genCodeDesc 记录里查 `genRatio`；如果稀疏的 v26.03 `DETAIL` 没有匹配的行条目，则这行按人写/未归因处理，有效 `genRatio=0`。运行时**不需要实时 blame**；要完全离线运行，必须预先导出 patch 文件、提交/版本顺序元数据，以及足够的回放上下文，确保选中的 patch 链可以确定性地应用到 `toCommit`。
 
 顺序是正确性契约的一部分：
 
@@ -84,7 +200,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  B1["输入: genCodeDescDir v26.03 + commitPatchDir"]
+  B1["输入: genCodeDescDir v26.03 + commitPatchDir + 顺序/回放上下文"]
   B2["从 VCS 历史元数据生成回放序列"]
   B3{"VCS 类型?"}
   B4["Git: 父提交先于子提交的拓扑顺序"]
@@ -124,6 +240,7 @@ flowchart TD
 - 实际上是在**重建一个部分 blame 引擎**——回放逻辑有任何缺口都会悄悄产生错误的归属。
 - 每个被回放的版本都得有一个 unified-diff patch 文件。每个 patch 文件代表完整提交 diff：可以覆盖多个文件，每个文件 diff 又可以包含多个 hunk。每个文件区块和每个 hunk 都必须被回放。
 - patch 顺序必须来自 VCS 历史元数据，不能来自文件系统。
+- 如果回放从 `fromCommit` 开始，仍然必须有确定性的起始状态或等价的导出上下文；窗口前未变化的行不进入分母，除非后续回放的 patch 修改了它们。
 - 合并感知的血统回放**很复杂**——合并多的历史要达到生产就绪需要认真做 TDD。
 - SVN 的 path-copy 和 mergeinfo 语义引入的回放边界情况还没完全覆盖。
 - 还是需要逐版本的 genCodeDesc v26.03——只是把 blame 那步省了。
@@ -161,7 +278,7 @@ flowchart TD
 
 - 分析时**零 VCS 访问**——不用检出、不用子进程、不用网络。
 - **零 diff 产物**——不需要 `commitPatchDir`。
-- 每次提交的文件很小：只记变更的行，不是全量快照。
+- 每次提交的文件只受变更行数量约束，不是全量快照；高 churn 的提交仍然可能产生很大的记录。
 - 当 codeAgent 在写入时捕获了真实 VCS blame，Git 和 SVN 来源的 blame 都能用。
 - 最适合**断网、边缘设备、大规模批处理**场景。
 
@@ -189,14 +306,14 @@ flowchart TD
 
 ## ======>>>它们之间的关系<<<======
 
-三种算法在相同场景下**语义等价**。选哪个取决于有什么条件、能接受什么取舍：
+在所需产物完整、策略选择一致时，三种算法在相同场景下**语义等价**。选哪个取决于有什么条件、能接受什么取舍：
 
 | 决策因素 | 选 A | 选 B | 选 C |
 | --- | --- | --- | --- |
 | 有活的仓库检出 | 是 | — | — |
 | 需要权威的 VCS 证据 | 是 | — | — |
 | 访问仓库贵或者不行 | — | 是 | 是 |
-| 有预导出的 diff 补丁和顺序元数据 | — | 是 | — |
+| 有预导出的 diff 补丁、顺序元数据和回放上下文 | — | 是 | — |
 | 想要历史过程度量 | — | 是 | — |
 | 要最少的运行时依赖 | — | — | 是 |
 | 断网 / 边缘部署 | — | — | 是 |
