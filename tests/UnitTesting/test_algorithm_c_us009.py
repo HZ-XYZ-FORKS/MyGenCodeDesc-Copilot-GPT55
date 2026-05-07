@@ -108,4 +108,7 @@ def test_algorithm_c_duplicate_add_overwrites_later_entry_and_reports_warning(tm
         ("src/app.py", 42, 40, "vibeCoding")
     ]
     assert result.diagnostics["duplicateAddEntries"] == ["src/app.py:code:42 overwritten by revision c2"]
-    assert any("SUMMARY.totalCodeLines expected 500 entries, found 1" in warning for warning in result.diagnostics["warnings"])
+    assert any(
+        "SUMMARY.partialGeneratedCodeLines expected 0 lines, found 1" in warning
+        for warning in result.diagnostics["warnings"]
+    )

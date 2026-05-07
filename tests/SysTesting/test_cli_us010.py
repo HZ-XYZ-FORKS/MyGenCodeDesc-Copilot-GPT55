@@ -286,12 +286,14 @@ def test_aggregate_gen_code_desc_py_warns_and_continues_on_summary_detail_mismat
     gen_code_desc_dir = tmp_path / "genCodeDesc"
     output_dir = tmp_path / "out"
     gen_code_desc_dir.mkdir()
-    _write_record(gen_code_desc_dir / "rev1.json", _v2604_record(summary_total_code_lines=2))
+    record = _v2604_record()
+    record["SUMMARY"]["fullGeneratedCodeLines"] = 0
+    _write_record(gen_code_desc_dir / "rev1.json", record)
 
     completed = _run_algorithm_c(gen_code_desc_dir, output_dir, extra_args=["--logLevel", "WARN"])
 
     assert completed.returncode == 0, completed.stderr
-    _assert_structured_log(completed.stderr, "WARN", "LOAD", "revisionId=rev1 SUMMARY.totalCodeLines expected 2 entries, found 1")
+    _assert_structured_log(completed.stderr, "WARN", "LOAD", "revisionId=rev1 SUMMARY.fullGeneratedCodeLines expected 0 lines, found 1")
     assert "[INFO]" not in completed.stderr
     assert (output_dir / "genCodeDescV26.03.json").exists()
 

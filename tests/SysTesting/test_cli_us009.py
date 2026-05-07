@@ -163,7 +163,7 @@ def test_aggregate_gen_code_desc_py_algorithm_c_reports_duplicate_add_and_summar
 
     assert completed.returncode == 0, completed.stderr
     assert "duplicate add entry" in completed.stderr
-    assert "SUMMARY.totalCodeLines expected 500 entries, found 1" in completed.stderr
+    assert "SUMMARY.partialGeneratedCodeLines expected 0 lines, found 1" in completed.stderr
     aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 1
     assert aggregate["AGGREGATE"]["diagnostics"]["duplicateAddEntries"] == ["src/app.py:code:42 overwritten by revision c2"]

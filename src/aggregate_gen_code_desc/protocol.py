@@ -9,14 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-SUMMARY_KEYS = (
-    "totalCodeLines",
-    "fullGeneratedCodeLines",
-    "partialGeneratedCodeLines",
-    "totalDocLines",
-    "fullGeneratedDocLines",
-    "partialGeneratedDocLines",
-)
+SUMMARY_DOC_KEYS = ("totalDocLines", "fullGeneratedDocLines", "partialGeneratedDocLines")
 GIT_REVISION_ID = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 SVN_REVISION_ID = re.compile(r"^[rR]?[1-9][0-9]*$")
 
@@ -205,20 +198,38 @@ def _validate_record_schema(record: dict[str, Any], path: Path) -> None:
         raise ValueError("protocolName must be generatedTextDesc")
     protocol_version = _require_str(record, "protocolVersion")
     _require_str(record, "codeAgent")
-    _validate_summary(_require_mapping(record, "SUMMARY"))
+    _validate_summary(_require_mapping(record, "SUMMARY"), protocol_version)
     vcs_type = _validate_repository(_require_mapping(record, "REPOSITORY"), protocol_version)
     _validate_detail(_require_list(record, "DETAIL"), protocol_version, vcs_type)
 
 
-def _validate_summary(summary: dict[str, Any]) -> None:
-    for summary_key in SUMMARY_KEYS:
-        _require_int(summary, summary_key, f"SUMMARY.{summary_key}")
+def _validate_summary(summary: dict[str, Any], protocol_version: str) -> None:
+    total_code_lines = _require_int(summary, "totalCodeLines", "SUMMARY.totalCodeLines")
+    if total_code_lines > 0 or protocol_version != "26.03":
+        _require_int(summary, "fullGeneratedCodeLines", "SUMMARY.fullGeneratedCodeLines")
+        _require_int(summary, "partialGeneratedCodeLines", "SUMMARY.partialGeneratedCodeLines")
+    else:
+        _validate_optional_int(summary, "fullGeneratedCodeLines", "SUMMARY.fullGeneratedCodeLines")
+        _validate_optional_int(summary, "partialGeneratedCodeLines", "SUMMARY.partialGeneratedCodeLines")
+
+    if protocol_version != "26.03":
+        for summary_key in SUMMARY_DOC_KEYS:
+            _require_int(summary, summary_key, f"SUMMARY.{summary_key}")
+        return
+
+    total_doc_lines = _validate_optional_int(summary, "totalDocLines", "SUMMARY.totalDocLines")
+    if total_doc_lines is not None and total_doc_lines > 0:
+        _require_int(summary, "fullGeneratedDocLines", "SUMMARY.fullGeneratedDocLines")
+        _require_int(summary, "partialGeneratedDocLines", "SUMMARY.partialGeneratedDocLines")
+    else:
+        _validate_optional_int(summary, "fullGeneratedDocLines", "SUMMARY.fullGeneratedDocLines")
+        _validate_optional_int(summary, "partialGeneratedDocLines", "SUMMARY.partialGeneratedDocLines")
 
 
 def _validate_repository(repository: dict[str, Any], protocol_version: str) -> str:
-    for repository_key in ("vcsType", "repoURL", "repoBranch", "revisionId"):
+    for repository_key in ("repoURL", "repoBranch", "revisionId"):
         _require_str(repository, repository_key, f"REPOSITORY.{repository_key}")
-    vcs_type = str(repository["vcsType"])
+    vcs_type = _optional_str(repository, "vcsType", "REPOSITORY.vcsType") or "git"
     _validate_revision_id(str(repository["revisionId"]), vcs_type, "REPOSITORY.revisionId")
     if "parentRevisionIds" in repository:
         for index, parent_revision_id in enumerate(_parent_revision_ids(repository)):
@@ -234,6 +245,8 @@ def _validate_detail(detail: list[Any], protocol_version: str, vcs_type: str) ->
         if not isinstance(file_detail, dict):
             raise ValueError(f"{file_path} must be an object")
         _require_str(file_detail, "fileName", f"{file_path}.fileName")
+        if "codeLines" not in file_detail and "docLines" not in file_detail:
+            raise ValueError(f"{file_path} must include codeLines or docLines")
         for collection_name in ("codeLines", "docLines"):
             if collection_name not in file_detail:
                 continue
@@ -344,22 +357,69 @@ def _require_int(container: dict[str, Any], key: str, field_path: str | None = N
     return value
 
 
+def _validate_optional_int(container: dict[str, Any], key: str, field_path: str) -> int | None:
+    if key not in container:
+        return None
+    return _require_int(container, key, field_path)
+
+
+def _optional_str(container: dict[str, Any], key: str, field_path: str) -> str | None:
+    if key not in container:
+        return None
+    return _require_str(container, key, field_path)
+
+
 def _summary_detail_warnings(records: list[dict[str, Any]]) -> list[str]:
     warnings = []
     for record in records:
         repository = record.get("REPOSITORY", {})
         revision_id = str(repository.get("revisionId", "<unknown>"))
         summary = record.get("SUMMARY", {})
-        for summary_key, collection_name in (("totalCodeLines", "codeLines"), ("totalDocLines", "docLines")):
-            if summary_key not in summary:
-                continue
-            expected_count = int(summary[summary_key])
-            found_count = _record_entry_count(record, collection_name)
-            if expected_count != found_count:
-                warnings.append(
-                    f"revisionId={revision_id} SUMMARY.{summary_key} expected {expected_count} entries, found {found_count}"
-                )
+        for collection_name, total_key, full_key, partial_key in (
+            ("codeLines", "totalCodeLines", "fullGeneratedCodeLines", "partialGeneratedCodeLines"),
+            ("docLines", "totalDocLines", "fullGeneratedDocLines", "partialGeneratedDocLines"),
+        ):
+            found_total = _record_line_count(record, collection_name)
+            if total_key in summary:
+                expected_total = int(summary[total_key])
+                if expected_total < found_total:
+                    warnings.append(
+                        f"revisionId={revision_id} SUMMARY.{total_key} expected at least {found_total} lines, found {expected_total}"
+                    )
+            for summary_key, predicate in (
+                (full_key, lambda gen_ratio: gen_ratio == 100),
+                (partial_key, lambda gen_ratio: 0 < gen_ratio < 100),
+            ):
+                if summary_key not in summary:
+                    continue
+                expected_count = int(summary[summary_key])
+                found_count = _record_generated_line_count(record, collection_name, predicate)
+                if expected_count != found_count:
+                    warnings.append(
+                        f"revisionId={revision_id} SUMMARY.{summary_key} expected {expected_count} lines, found {found_count}"
+                    )
+
     return warnings
+
+
+def _record_generated_line_count(record: dict[str, Any], collection_name: str, predicate) -> int:
+    total = 0
+    for file_detail in record.get("DETAIL", []):
+        for entry in file_detail.get(collection_name, []):
+            gen_ratio = int(entry.get("genRatio", 0))
+            if predicate(gen_ratio):
+                total += len(expand_entry_lines(entry))
+    return total
+
+
+def _record_line_count(record: dict[str, Any], collection_name: str) -> int:
+    total = 0
+    for file_detail in record.get("DETAIL", []):
+        for entry in file_detail.get(collection_name, []):
+            if "genRatio" not in entry:
+                continue
+            total += len(expand_entry_lines(entry))
+    return total
 
 
 def _record_summary(record: dict[str, Any]) -> dict[str, Any]:

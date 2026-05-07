@@ -99,6 +99,109 @@ def test_loader_rejects_v2603_detail_entry_without_line_location_or_range(tmp_pa
         _load(record, tmp_path)
 
 
+# US-006 / BASE v26.03 optional doc SUMMARY fields / TC-UNIT-056
+def test_loader_accepts_v2603_record_without_optional_doc_summary_fields(tmp_path):
+    record = _valid_record(protocol_version="26.03")
+    for field_name in ("totalDocLines", "fullGeneratedDocLines", "partialGeneratedDocLines"):
+        record["SUMMARY"].pop(field_name)
+
+    loaded = _load(record, tmp_path)
+
+    assert loaded.protocol_version == "26.03"
+
+
+# US-006, US-007 / BASE v26.03 optional vcsType default / TC-UNIT-057
+def test_loader_accepts_v2603_record_without_optional_vcs_type_as_git(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGGREGATE_GCD_ALLOW_SYNTHETIC_REVISION_IDS", raising=False)
+    record = _valid_record(protocol_version="26.03")
+    record["REPOSITORY"].pop("vcsType")
+    record["REPOSITORY"]["revisionId"] = "a" * 40
+
+    loaded = _load(record, tmp_path)
+
+    assert loaded.record_summaries == [{"revisionId": "a" * 40, "entries": 1}]
+
+
+# US-006 / BASE v26.03 DETAIL code/doc collection presence / TC-UNIT-058
+def test_loader_rejects_detail_file_without_code_or_doc_lines(tmp_path):
+    record = _valid_record(protocol_version="26.03")
+    record["DETAIL"] = [{"fileName": "src/empty.py"}]
+
+    with pytest.raises(ValueError, match=r"DETAIL\[0\] must include codeLines or docLines"):
+        _load(record, tmp_path)
+
+
+# US-006 / BASE v26.03 SUMMARY generated-count relationship with ranges / TC-UNIT-059
+def test_loader_warns_when_generated_summary_counts_do_not_match_expanded_detail_lines(tmp_path):
+    record = _valid_record(protocol_version="26.03")
+    record["SUMMARY"] = {
+        "totalCodeLines": 8,
+        "fullGeneratedCodeLines": 2,
+        "partialGeneratedCodeLines": 1,
+    }
+    record["DETAIL"] = [
+        {
+            "fileName": "src/ranged.py",
+            "codeLines": [
+                {"lineRange": {"from": 1, "to": 3}, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineRange": {"from": 4, "to": 5}, "genRatio": 40, "genMethod": "vibeCoding"},
+            ],
+        }
+    ]
+
+    loaded = _load(record, tmp_path)
+
+    assert loaded.warnings == [
+        "revisionId=rev1 SUMMARY.fullGeneratedCodeLines expected 2 lines, found 3",
+        "revisionId=rev1 SUMMARY.partialGeneratedCodeLines expected 1 lines, found 2",
+    ]
+
+
+# US-006 / BASE v26.03 expanded lineRange summary/detail agreement / TC-UNIT-060
+def test_loader_accepts_expanded_line_range_summary_detail_agreement_without_warnings(tmp_path):
+    record = _valid_record(protocol_version="26.03")
+    record["SUMMARY"] = {
+        "totalCodeLines": 5,
+        "fullGeneratedCodeLines": 3,
+        "partialGeneratedCodeLines": 2,
+    }
+    record["DETAIL"] = [
+        {
+            "fileName": "src/ranged.py",
+            "codeLines": [
+                {"lineRange": {"from": 1, "to": 3}, "genRatio": 100, "genMethod": "codeCompletion"},
+                {"lineRange": {"from": 4, "to": 5}, "genRatio": 50, "genMethod": "vibeCoding"},
+            ],
+        }
+    ]
+
+    loaded = _load(record, tmp_path)
+
+    assert loaded.warnings == []
+
+
+# US-006 / BASE v26.03 sparse manual-line omission / TC-UNIT-061
+def test_loader_allows_sparse_manual_code_lines_without_total_count_warning(tmp_path):
+    record = _valid_record(protocol_version="26.03")
+    record["SUMMARY"] = {
+        "totalCodeLines": 5,
+        "fullGeneratedCodeLines": 1,
+        "partialGeneratedCodeLines": 0,
+    }
+    record["DETAIL"] = [
+        {
+            "fileName": "src/sparse.py",
+            "codeLines": [
+                {"lineLocation": 3, "genRatio": 100, "genMethod": "codeCompletion"},
+            ],
+        }
+    ]
+
+    loaded = _load(record, tmp_path)
+
+    assert loaded.warnings == []
+
+
 # US-006 / v26.04 blame required-field validation / TC-UNIT-050
 def test_loader_rejects_v2604_add_entry_without_blame_timestamp(tmp_path):
     record = _valid_record(protocol_version="26.04")
