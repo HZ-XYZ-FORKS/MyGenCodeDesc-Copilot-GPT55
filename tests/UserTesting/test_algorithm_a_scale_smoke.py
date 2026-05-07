@@ -154,7 +154,7 @@ def test_alg_a_scale_smoke_counts_multi_file_generated_snapshot(tmp_path):
 
     expected_lines = file_count * lines_per_file
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
     assert aggregate["SUMMARY"]["totalCodeLines"] == expected_lines
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == expected_lines

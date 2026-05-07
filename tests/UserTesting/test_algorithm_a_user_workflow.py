@@ -149,7 +149,7 @@ def _run_root_cli(args):
 
 
 def _assert_no_partial_outputs(output_dir):
-    assert not (output_dir / "genCodeDescV26.03.json").exists()
+    assert not (output_dir / "aggregatedGenCodeDescV26.03.json").exists()
     assert not (output_dir / "commitStart2EndTime.patch").exists()
 
 
@@ -234,7 +234,7 @@ def test_alg_a_user_workflow_without_end_rev_uses_end_time_snapshot(tmp_path):
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
     assert {
         "totalCodeLines": aggregate["SUMMARY"]["totalCodeLines"],
@@ -296,7 +296,7 @@ def test_alg_a_remote_user_workflow_without_repo_path_auto_clones(tmp_path):
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert {
         "repoUrl": aggregate["REPOSITORY"]["repoURL"],
         "totalCodeLines": aggregate["SUMMARY"]["totalCodeLines"],
@@ -351,7 +351,7 @@ def test_alg_a_shallow_git_workflow_reports_partial_blame_warning(tmp_path):
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert "shallow Git history" in completed.stderr
     assert any("shallow Git history" in warning for warning in aggregate["AGGREGATE"]["diagnostics"]["warnings"])
 
@@ -418,7 +418,7 @@ def test_alg_a_svn_workflow_uses_end_time_snapshot_and_patch_window(tmp_path):
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
     assert {
         "totalCodeLines": aggregate["SUMMARY"]["totalCodeLines"],

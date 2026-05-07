@@ -143,7 +143,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_outputs_line_ownership_transfers
     completed = _run_algorithm_b(gen_code_desc_dir, commit_patch_dir, output_dir)
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 2
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 0

@@ -25,7 +25,7 @@ Implemented / Passing
 - AC-001-6: No in-window lines yields zero denominator.
 - AC-001-7: Sparse v26.03 DETAIL treats omitted lines as manual.
 - CLI arguments: `--repoUrl`, `--repoBranch`, `--startTime`, `--endTime`, `--genCodeDescDir`, `--algorithm`, `--scope`, `--threshold`, `--repoPath`, `--commitPatchDir`, `--outputDir`.
-- System behavior: top-level `aggregateGenCodeDesc.py` writes `genCodeDescV26.03.json` and `commitStart2EndTime.patch`.
+- System behavior: top-level `aggregateGenCodeDesc.py` writes `aggregatedGenCodeDescV26.03.json` and `commitStart2EndTime.patch`.
 - Algorithm coverage: A, B, and C.
 - Protocol coverage: v26.03 and v26.04.
 - Algorithm B replay coverage: add-only patches, multi-patch delete/modify/add replay, multi-file/multi-hunk patch replay, pure rename, rename plus modify, chained rename, deleted file exclusion, copied file attribution, Git parent-before-child ordering, SVN numeric revision ordering, final snapshot denominator, ordered patch artifact output, and missing patch directory diagnostics.

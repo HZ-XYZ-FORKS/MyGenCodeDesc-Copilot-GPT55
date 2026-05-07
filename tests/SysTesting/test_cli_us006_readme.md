@@ -22,7 +22,7 @@ Implemented / Passing
 - US-010 / AC-010-4: fatal clock-skew errors are logged to stderr.
 - US-010 / AC-010-5: `--logLevel ERROR` suppresses logs for successful runs.
 - US-010 / AC-010-6: fatal errors use a structured timestamp/level/component/message log format.
-- System behavior: top-level `aggregateGenCodeDesc.py` returns exit code 2 and does not write `genCodeDescV26.03.json` or `commitStart2EndTime.patch` on fatal validation errors.
+- System behavior: top-level `aggregateGenCodeDesc.py` returns exit code 2 and does not write `aggregatedGenCodeDescV26.03.json` or `commitStart2EndTime.patch` on fatal validation errors.
 - Output contract: successful Algorithm A and Algorithm C root CLI runs write non-empty `commitStart2EndTime.patch` artifacts with algorithm headers.
 
 ## Manual

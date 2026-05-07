@@ -5,12 +5,34 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _write_record(path, record):
     path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+
+
+def _read_aggregate(output_dir):
+    return json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
+
+
+def _assert_timing_summary(timing):
+    duration_fields = [
+        "totalSeconds",
+        "cloneRepoSeconds",
+        "checkoutSeconds",
+        "loadGenCodeDescSeconds",
+        "blameSeconds",
+        "diffSeconds",
+        "aggregateSeconds",
+        "writeOutputSeconds",
+    ]
+    for field_name in duration_fields:
+        assert isinstance(timing[field_name], (int, float))
+        assert timing[field_name] >= 0
+    for field_name in duration_fields[1:]:
+        assert timing["totalSeconds"] >= timing[field_name]
+    assert isinstance(timing["notRun"], list)
 
 
 def _run_git(repo_path, *args, env=None):
@@ -263,7 +285,55 @@ def test_aggregate_gen_code_desc_py_default_info_logs_load_process_and_summary_p
     _assert_structured_log(completed.stderr, "INFO", "PROCESS", "PROCESS algorithm=C records=1 lines=1")
     _assert_structured_log(completed.stderr, "INFO", "SUMMARY", "SUMMARY aggregate totalLines=1 weighted=100.0%")
     assert "[DEBUG]" not in completed.stderr
-    assert (output_dir / "genCodeDescV26.03.json").exists()
+    assert (output_dir / "aggregatedGenCodeDescV26.03.json").exists()
+
+
+# US-010 / AC-010-8 / default timing summary / TC-SYS-050
+def test_aggregate_gen_code_desc_py_default_timing_summary_writes_timing_object_and_log(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    _write_record(gen_code_desc_dir / "rev1.json", _v2604_record())
+
+    completed = _run_algorithm_c(gen_code_desc_dir, output_dir)
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = _read_aggregate(output_dir)
+    _assert_timing_summary(aggregate["TIMING"])
+    assert "cloneRepo" in aggregate["TIMING"]["notRun"]
+    assert "blame" in aggregate["TIMING"]["notRun"]
+    _assert_structured_log(completed.stderr, "INFO", "TIMING", "TIMING totalSeconds=")
+
+
+# US-010 / AC-010-8 / timing off policy / TC-SYS-051
+def test_aggregate_gen_code_desc_py_timing_off_omits_timing_object_and_logs(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    _write_record(gen_code_desc_dir / "rev1.json", _v2604_record())
+
+    completed = _run_algorithm_c(gen_code_desc_dir, output_dir, extra_args=["--timing", "off"])
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = _read_aggregate(output_dir)
+    assert "TIMING" not in aggregate
+    assert "[TIMING]" not in completed.stderr
+
+
+# US-010 / AC-010-8 / detailed timing logs / TC-SYS-052
+def test_aggregate_gen_code_desc_py_detailed_timing_logs_stage_records(tmp_path):
+    gen_code_desc_dir = tmp_path / "genCodeDesc"
+    output_dir = tmp_path / "out"
+    gen_code_desc_dir.mkdir()
+    _write_record(gen_code_desc_dir / "rev1.json", _v2604_record())
+
+    completed = _run_algorithm_c(gen_code_desc_dir, output_dir, extra_args=["--timing", "detailed"])
+
+    assert completed.returncode == 0, completed.stderr
+    aggregate = _read_aggregate(output_dir)
+    _assert_timing_summary(aggregate["TIMING"])
+    _assert_structured_log(completed.stderr, "INFO", "TIMING", "TIMING stage=loadGenCodeDescSeconds seconds=")
+    _assert_structured_log(completed.stderr, "INFO", "TIMING", "TIMING stage=aggregateSeconds seconds=")
 
 
 # US-010 / AC-010-2, AC-010-6 / DEBUG detail / TC-SYS-021
@@ -295,7 +365,7 @@ def test_aggregate_gen_code_desc_py_warns_and_continues_on_summary_detail_mismat
     assert completed.returncode == 0, completed.stderr
     _assert_structured_log(completed.stderr, "WARN", "LOAD", "revisionId=rev1 SUMMARY.fullGeneratedCodeLines expected 0 lines, found 1")
     assert "[INFO]" not in completed.stderr
-    assert (output_dir / "genCodeDescV26.03.json").exists()
+    assert (output_dir / "aggregatedGenCodeDescV26.03.json").exists()
 
 
 # US-010 / AC-010-5, AC-010-6 / stdout metric result contract / TC-SYS-040

@@ -484,8 +484,9 @@ def test_aggregate_gen_code_desc_py_writes_us001_aggregate_json(tmp_path):
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate_path = output_dir / "genCodeDescV26.03.json"
+    aggregate_path = output_dir / "aggregatedGenCodeDescV26.03.json"
     assert aggregate_path.exists()
+    assert not (output_dir / "genCodeDescV26.03.json").exists()
     aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
 
     assert aggregate["protocolVersion"] == "26.03"
@@ -538,7 +539,7 @@ def test_aggregate_gen_code_desc_py_outputs_zero_denominator_when_no_live_lines_
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 0
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.0
     assert aggregate["AGGREGATE"]["metrics"]["fullyAI"]["value"] == 0.0
@@ -587,7 +588,7 @@ def test_aggregate_gen_code_desc_py_supports_v2603_with_algorithm_a(tmp_path):
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["AGGREGATE"]["parameters"]["algorithm"] == "A"
     assert aggregate["AGGREGATE"]["parameters"]["inputProtocolVersion"] == "26.03"
     assert aggregate["SUMMARY"]["totalCodeLines"] == 10
@@ -645,7 +646,7 @@ def test_aggregate_gen_code_desc_py_supports_v2603_with_algorithm_b_patch_replay
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["AGGREGATE"]["parameters"]["algorithm"] == "B"
     assert aggregate["AGGREGATE"]["parameters"]["inputProtocolVersion"] == "26.03"
     assert aggregate["SUMMARY"]["totalCodeLines"] == 10
@@ -726,7 +727,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_multiple_patches_to_fina
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 5
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 2
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
@@ -828,7 +829,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_counts_only_alive_subset_of_wind
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 1
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 0
@@ -960,7 +961,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_uses_parent_order_over_timestamp
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 1
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.4
@@ -1035,7 +1036,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_uses_svn_revision_order_over_tim
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["REPOSITORY"]["vcsType"] == "svn"
     assert aggregate["SUMMARY"]["totalCodeLines"] == 1
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
@@ -1137,7 +1138,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_multifile_multihunk_patc
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 8
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 2
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 4
@@ -1234,7 +1235,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_pure_rename(tmp_path):
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 3
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
@@ -1328,7 +1329,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_rename_plus_modify(tmp_p
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 3
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
@@ -1426,7 +1427,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_chained_renames(tmp_path
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 3
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
@@ -1514,7 +1515,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_excludes_deleted_file(tmp_path):
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 0
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 0
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 0
@@ -1601,7 +1602,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_attributes_copied_file_to_copy_c
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 6
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 2
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 3

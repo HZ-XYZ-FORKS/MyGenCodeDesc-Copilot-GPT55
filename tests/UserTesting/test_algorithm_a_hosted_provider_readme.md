@@ -26,4 +26,4 @@ Implemented / Skipped unless fixture environment variables are configured
    - `AGGREGATE_GCD_HOSTED_GIT_LINE`
 3. Ensure any required Git credentials are available to `git clone`.
 4. Run `python3 -m pytest tests/UserTesting/test_algorithm_a_hosted_provider.py -v`.
-5. Confirm `genCodeDescV26.03.json` and `commitStart2EndTime.patch` are written and the aggregate counts at least one generated line.
+5. Confirm `aggregatedGenCodeDescV26.03.json` and `commitStart2EndTime.patch` are written and the aggregate counts at least one generated line.

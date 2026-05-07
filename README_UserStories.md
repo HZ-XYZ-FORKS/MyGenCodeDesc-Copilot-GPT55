@@ -159,6 +159,17 @@ Scenario: [Typical] Metrics aggregate only the alive subset of the window diff
   AND lines alive at endTime but last changed before startTime do not contribute to the denominator
 ```
 
+### AC-001-9: [Typical] outputDir writes a distinct aggregate genCodeDesc artifact
+
+```gherkin
+Scenario: [Typical] Aggregate JSON output uses the aggregated filename
+  GIVEN aggregateGenCodeDesc is invoked with --outputDir ./out
+  WHEN the tool writes the aggregate JSON result
+  THEN the JSON artifact is named aggregatedGenCodeDescV26.03.json
+  AND the artifact is based on the genCodeDescProtoV26.03 JSON shape
+  AND the tool does not name the aggregate artifact genCodeDescV26.03.json
+```
+
 ---
 
 ## US-002: File-Level Conditions
@@ -572,18 +583,34 @@ Scenario: [Performance] AlgA at reference scale
   AND peak memory stays below 1 GB for sequential processing
 ```
 
-### AC-008-2: [Performance] AlgC processes 200 GB genCodeDesc data
+### AC-008-2: [Performance] AlgA handles a realistic 60-day multi-branch project
+
+```gherkin
+Scenario: [Performance] AlgA on one repo with 5 developers, 20 branches, and 60 days of activity
+  GIVEN one Git repository has 5 active developers
+  AND the repository has 20 active branches
+  AND the repository receives about 10 commits per day across all branches for the last 60 days
+  AND aggregateGenCodeDesc runs AlgA on repoBranch "main" for that 60-day [startTime, endTime] window
+  WHEN the tool computes the aggregate metrics
+  THEN fromCommit and toCommit are selected only from commits reachable on repoBranch "main"
+  AND branch-only commits that are not merged into "main" by endTime do not enter the denominator
+  AND merged, squash-merged, cherry-picked, and reverted lines follow their existing AC ownership rules
+  AND every counted live line is joined to genCodeDescV26.03 by blame origin revision and origin coordinates
+  AND the run completes with documented runtime, memory, blame command count, and degraded-result warnings if any
+```
+
+### AC-008-3: [Performance] AlgC processes 1 GB genCodeDescV26.04 data
 
 ```gherkin
 Scenario: [Performance] AlgC streaming at reference scale
-  GIVEN 1,000 genCodeDesc files totaling ~200 GB
-  AND each file has ~1M DETAIL entries
+  GIVEN genCodeDescV26.04 files totaling ~1 GB
+  AND the files include enough DETAIL entries to require streaming rather than full in-memory loading
   WHEN aggregateGenCodeDesc runs AlgC (embedded blame)
   THEN files are streamed in timestamp order (not all loaded at once)
-  AND peak memory is bounded by surviving set size (~6 GB)
+  AND peak memory is bounded by the surviving line set and fork documents actual memory usage
 ```
 
-### AC-008-3: [Edge] Zero commits in the window
+### AC-008-4: [Edge] Zero commits in the window
 
 ```gherkin
 Scenario: [Edge] Empty time window
@@ -594,7 +621,7 @@ Scenario: [Edge] Empty time window
   AND the tool completes without error
 ```
 
-### AC-008-4: [Robust] Tool recovers from mid-stream I/O failure
+### AC-008-5: [Robust] Tool recovers from mid-stream I/O failure
 
 ```gherkin
 Scenario: [Robust] Disk read fails on one genCodeDesc file
@@ -616,15 +643,15 @@ SO THAT the metric result is accurate regardless of which algorithm the fork imp
 
 ### AlgA — Live Blame
 
-#### AC-009-1: [Typical] Blame traces through rename via -M
+#### AC-009-1: [Typical] Blame traces through whole-file rename
 
 ```gherkin
-Scenario: [Typical] AlgA follows renamed file via git blame -M
+Scenario: [Typical] AlgA follows renamed file via git blame
   GIVEN file "old_name.py" was renamed to "new_name.py" in commit C1
   AND line 10 of "new_name.py" was originally written in commit C0
   WHEN aggregateGenCodeDesc runs AlgA with git blame on "new_name.py"
-  THEN blame reports line 10's origin as commit C0 (not C1)
-  AND genRatio comes from C0's genCodeDesc
+  THEN blame reports line 10's origin as commit C0 (not C1) and origin file "old_name.py"
+  AND genRatio lookup uses C0's genCodeDesc at the origin coordinates
 ```
 
 #### AC-009-2: [Edge] Cross-file move detected via -C -C
@@ -650,9 +677,50 @@ Scenario: [Fault] Remote VCS is down when AlgA runs blame
   AND the tool suggests retrying or using AlgC (no VCS access needed)
 ```
 
+#### AC-009-4: [Typical] AlgA joins genCodeDesc by blame origin coordinates
+
+```gherkin
+Scenario: [Typical] AlgA uses origin coordinates for v26.03 lookup after rename and line-number shift
+  GIVEN commit C1 within [startTime, endTime] creates "src/a.py" line 2 with genRatio 100 in genCodeDescV26.03(C1)
+  AND commit C2 before endTime renames the file to "src/math_utils.py" and inserts a header so the same live text is now current line 4
+  WHEN aggregateGenCodeDesc runs AlgA at endTime
+  THEN blame resolves current "src/math_utils.py" line 4 to origin revision C1, origin file "src/a.py", and origin line 2
+  AND the genRatio lookup uses genCodeDescV26.03(C1) DETAIL for "src/a.py" line 2
+  AND the implementation does not look up "src/math_utils.py" line 4 in C1's genCodeDesc
+  AND the live line is counted with genRatio 100
+```
+
+#### AC-009-5: [Typical] AlgA handles a single in-window commit
+
+```gherkin
+Scenario: [Typical] AlgA computes metrics when exactly one commit is inside the time window
+  GIVEN the only commit with timestamp in [startTime, endTime] is C1
+  AND C1 adds 3 lines, modifies 2 existing lines, deletes 1 line, and leaves 10 pre-window lines untouched
+  AND at endTime the 3 added lines and 2 modified current lines are still alive
+  WHEN aggregateGenCodeDesc runs AlgA
+  THEN fromCommit is C1 and toCommit is C1
+  AND blame includes only the 5 live lines whose origin revision is C1 in the metric denominator
+  AND the deleted line and 10 untouched pre-window lines are excluded from the denominator
+  AND genRatio for those 5 live C1-origin lines is looked up from genCodeDescV26.03(C1)
+```
+
+#### AC-009-6: [Typical] AlgA blames an isolated endTime snapshot
+
+```gherkin
+Scenario: [Typical] AlgA resolves endTime snapshot before running blame
+  GIVEN repoBranch has commit C1 as the last revision with timestamp <= endTime
+  AND commit C2 exists after endTime
+  AND the local repoPath is currently checked out at C2 with uncommitted work
+  WHEN aggregateGenCodeDesc runs AlgA for [startTime, endTime]
+  THEN the tool resolves toCommit as C1
+  AND blame runs against a clean isolated checkout or worktree at C1
+  AND blame is not run against the current HEAD C2
+  AND the user's working tree and uncommitted files are not modified
+```
+
 ### AlgB — Diff Replay
 
-#### AC-009-4: [Typical] Sequential multi-file diff replay in topological order
+#### AC-009-7: [Typical] Sequential multi-file diff replay in topological order
 
 ```gherkin
 Scenario: [Typical] AlgB replays multi-file, multi-hunk diffs in correct commit order
@@ -666,7 +734,7 @@ Scenario: [Typical] AlgB replays multi-file, multi-hunk diffs in correct commit 
   AND the final line-to-origin mapping matches the live file state at endTime
 ```
 
-#### AC-009-5: [Edge] Line-position tracking through chained renames
+#### AC-009-8: [Edge] Line-position tracking through chained renames
 
 ```gherkin
 Scenario: [Edge] AlgB tracks lines across rename chain
@@ -678,7 +746,7 @@ Scenario: [Edge] AlgB tracks lines across rename chain
   AND the rename graph correctly maps v1.py → v2.py → v3.py
 ```
 
-#### AC-009-6: [Fault] One diff in the chain is missing
+#### AC-009-9: [Fault] One diff in the chain is missing
 
 ```gherkin
 Scenario: [Fault] AlgB cannot retrieve diff for commit C3
@@ -692,7 +760,7 @@ Scenario: [Fault] AlgB cannot retrieve diff for commit C3
 
 ### AlgC — Embedded Blame (v26.04)
 
-#### AC-009-7: [Typical] Add/delete operations build correct surviving set
+#### AC-009-10: [Typical] Add/delete operations build correct surviving set
 
 ```gherkin
 Scenario: [Typical] AlgC accumulates surviving lines from add/delete entries
@@ -705,7 +773,7 @@ Scenario: [Typical] AlgC accumulates surviving lines from add/delete entries
   AND each surviving line's genRatio matches its add entry's genCodeDesc
 ```
 
-#### AC-009-8: [Edge] Duplicate add entry for same file+line
+#### AC-009-11: [Edge] Duplicate add entry for same file+line
 
 ```gherkin
 Scenario: [Edge] AlgC encounters duplicate add for the same line position
@@ -717,7 +785,7 @@ Scenario: [Edge] AlgC encounters duplicate add for the same line position
   AND the inconsistency is logged
 ```
 
-#### AC-009-9: [Fault] SUMMARY lineCount mismatches actual DETAIL entries
+#### AC-009-12: [Fault] SUMMARY lineCount mismatches actual DETAIL entries
 
 ```gherkin
 Scenario: [Fault] AlgC detects mismatch between SUMMARY and DETAIL
@@ -734,8 +802,8 @@ Scenario: [Fault] AlgC detects mismatch between SUMMARY and DETAIL
 ## US-010: Diagnostics and Logging
 
 AS A tool developer,
-I WANT `aggregateGenCodeDesc` to support `--logLevel` with levels DEBUG, INFO, WARN, ERROR,
-SO THAT I can inspect runtime behavior and diagnose bugs.
+I WANT `aggregateGenCodeDesc` to support `--logLevel` and `--timing`,
+SO THAT I can inspect runtime behavior, diagnose bugs, and understand stage-level runtime cost.
 
 ### AC-010-1: [Typical] Default log level is INFO with load/process/summary phases
 
@@ -828,19 +896,33 @@ Scenario: [Testability] Unit tests can set log level programmatically
   AND no global state leaks between test cases
 ```
 
+### AC-010-8: [Observability] TIMING reports stage durations in seconds
+
+```gherkin
+Scenario: [Observability] Timing output shows clone, blame, and aggregate cost
+  GIVEN aggregateGenCodeDesc is invoked with --timing summary
+  AND AlgA auto-clones a remote Git repository before analysis
+  WHEN the tool completes successfully
+  THEN the aggregate JSON includes a top-level TIMING object
+  AND TIMING includes non-negative second values for totalSeconds, cloneRepoSeconds, checkoutSeconds, loadGenCodeDescSeconds, blameSeconds, aggregateSeconds, and writeOutputSeconds
+  AND totalSeconds is greater than or equal to each individual measured stage
+  AND stages not used by the selected algorithm or access mode are either 0 or listed in TIMING.notRun
+  AND timing output does not change SUMMARY counts, DETAIL entries, AGGREGATE metrics, or commitStart2EndTime.patch content
+```
+
 | US | Title | AC Count | Categories Covered |
-| -- | ----- | -------- | ------------------ |
-| US-001 | Core Metric Calculation | 8 | Typical, Edge |
+|----|-------|----------|--------------------|
+| US-001 | Core Metric Calculation | 9 | Typical, Edge |
 | US-002 | File-Level Conditions | 4 | Typical, Edge |
 | US-003 | Commit-Level Conditions | 6 | Typical, Edge |
 | US-004 | Line-Level Conditions | 6 | Typical, Edge |
 | US-005 | Branch and History Conditions | 5 | Typical, Edge |
 | US-006 | Destructive and Edge Conditions | 6 | Fault, Misuse, Typical |
 | US-007 | Git vs SVN Differences | 5 | Typical, Edge |
-| US-008 | Scale and Performance | 4 | Performance, Edge, Robust |
-| US-009 | Algorithm-Specific Behavior | 9 | Typical, Edge, Fault |
-| US-010 | Diagnostics and Logging | 7 | Typical, Edge, Observability, Testability |
-| **Total** | | **60 AC** | |
+| US-008 | Scale and Performance | 5 | Performance, Edge, Robust |
+| US-009 | Algorithm-Specific Behavior | 12 | Typical, Edge, Fault |
+| US-010 | Diagnostics and Logging | 8 | Typical, Edge, Observability, Testability |
+| **Total** | | **66 AC** | |
 
 ---
 
@@ -848,51 +930,51 @@ Scenario: [Testability] Unit tests can set log level programmatically
 
 This section tracks **implemented and tested coverage in this fork**. It is intentionally separate from the appendix below, which describes what is applicable by VCS and algorithm in the BASE specification.
 
-Last verified: 2026-05-07 with `git diff --check` and full VS Code test run (`127 passed`; hosted-provider UserTesting skipped unless fixture env is configured).
+Last verified: 2026-05-07 with `git diff --check` and full VS Code test run (`130 passed`; hosted-provider UserTesting skipped unless fixture env is configured).
 
 | User Story | Current Status | Covered By | Remaining Gap |
 | ---------- | -------------- | ---------- | ------------- |
 | US-000 Safe Agent Sandbox | Partially covered by restored base workflow files | `.devcontainer/`, [README_ForkWorkflow.md](README_ForkWorkflow.md), [README_ForkWorkflow_ZH.md](README_ForkWorkflow_ZH.md), [README_TestGuide.md](README_TestGuide.md), and [README_TestGuide_ZH.md](README_TestGuide_ZH.md) now exist in this fork. | Manual Dev Container rebuild verification and an automated documentation/config check remain open. |
-| US-001 Core Metric Calculation | Covered for current vertical slice | UnitTesting covers AC-001-1 through AC-001-6. SysTesting covers AC-001-1, AC-001-2, AC-001-3, AC-001-6, and AC-001-7 across Algorithm A/B/C paths, plus AC-001-8 for Algorithm B alive-subset patch replay. UserTesting covers Algorithm A Git/SVN maintainer workflows for the alive-at-endTime subset without public `--endRev`, including SVN files deleted after `endTime`. | Broader non-happy-path algorithm workflows still belong to US-002 through US-010. |
+| US-001 Core Metric Calculation | Covered for current vertical slice | UnitTesting covers AC-001-1 through AC-001-6. SysTesting covers AC-001-1, AC-001-2, AC-001-3, AC-001-6, and AC-001-7 across Algorithm A/B/C paths, AC-001-8 for Algorithm B alive-subset patch replay, and AC-001-9 for the distinct `aggregatedGenCodeDescV26.03.json` output artifact. UserTesting covers Algorithm A Git/SVN maintainer workflows for the alive-at-endTime subset without public `--endRev`, including SVN files deleted after `endTime`. | Broader non-happy-path algorithm workflows still belong to US-002 through US-010. |
 | US-002 File-Level Conditions | Covered for current Algorithm B synthetic fixtures | AlgB UnitTesting/SysTesting covers pure rename, rename+modify, deleted file exclusion, and copied file attribution with the original source retained. | Broader real-repository coverage for AlgA/AlgC and VCS-specific copy edge cases remains open. |
 | US-003 Commit-Level Conditions | Covered for current Algorithm B synthetic fixtures | Algorithm B UnitTesting covers merge, squash merge, cherry-pick, revert, amend/force-push orphan handling, and rebase regenerated revisionIds. Root CLI SysTesting covers amend/force-push and rebase orphan handling through `aggregateGenCodeDesc.py --algorithm B`. | Broader real-repository coverage for AlgA/AlgC, root CLI merge/squash/cherry-pick/revert fixtures, and VCS-provider-specific branch workflows remain open. |
 | US-004 Line-Level Conditions | Covered for current Algorithm B synthetic fixtures | Algorithm B UnitTesting covers human edits to AI lines, AI rewrites of manual lines, whitespace-only delete/add policy, file-wide replacement/line-ending style changes, identical delete/re-add attribution, and moved-line attribution. Root CLI SysTesting covers human/AI transfer output plus the emitted line ownership policy. | Broader real-repository coverage for AlgA/AlgC, VCS-specific whitespace/blame policy differences, and root CLI fixtures for every AC-004 edge case remain open. |
 | US-005 Branch and History Conditions | Covered for current Algorithm B synthetic fixtures plus AlgA shallow-warning workflow | Algorithm B UnitTesting covers outside-window origin exclusion, multi-merge uniqueness, long-lived branch origin filtering, shallow-history/replay-context limitation policy, and submodule gitlink exclusion policy. Root CLI SysTesting covers multi-merge uniqueness and submodule policy through `aggregateGenCodeDesc.py --algorithm B`. UserTesting covers Algorithm A shallow Git working-copy warning diagnostics. | Broader real-repository coverage for AlgA/AlgC, deep provider-backed shallow-boundary attribution behavior, and VCS-provider-specific submodule/external workflows remain open. |
 | US-006 Destructive and Edge Conditions | Covered for current validation hardening slice | UnitTesting covers Algorithm A live Git blame revisions missing genCodeDesc as Manual/genRatio 0 with `missingRevisions` diagnostics, Algorithm B patch revisions missing genCodeDesc as Manual/genRatio 0, Algorithm C missing parent chain-break rejection, Algorithm C `onClockSkew=ignore` diagnostics, BASE v26.03 protocol requiredness sync for optional doc counters and optional Git `vcsType`, protocol required-field/type validation, `DETAIL[]` code/doc collection presence, sparse manual-line summary/detail policy, expanded `lineRange` generated-count diagnostics, and strict production revision-ID validation when the synthetic-fixture compatibility switch is disabled. SysTesting covers empty genCodeDesc input, AlgA/AlgB missing-record policies through `aggregateGenCodeDesc.py`, `--onMissing abort`, mismatched repoURL/repoBranch, duplicate revision ID reject and `last-wins` warning policies, invalid genRatio, corrupted JSON with file context, missing required SUMMARY, invalid SUMMARY count type, lower-camel mandatory CLI flag enforcement, optional UserGuide policy flag exposure, AlgC parent/child clock skew reject and ignore policies, and missing Algorithm B patch directory as fatal CLI errors with no partial output. | Exhaustive nested schema permutations remain open. |
 | US-007 Git vs SVN Differences | Covered for current Algorithm B synthetic fixtures plus local SVN Algorithm A fixtures | Algorithm B UnitTesting and root CLI SysTesting cover Git SHA-1/SHA-256 revision ID acceptance, SVN numeric revision replay ordering, SVN branch path normalization, SVN merge-blame limitation reporting, and SVN skipping Git-only rebase/amend assumptions. Protocol validation rejects malformed Git/SVN revision IDs under production strict mode. Root CLI SysTesting covers real local SVN working-copy `svn blame` through Algorithm A. UserTesting covers Algorithm A SVN endTime snapshot and `commitStart2EndTime.patch` windowing when a file is deleted after `endTime`. | Broader remote/provider real-repository AlgA/AlgC coverage and SVN merge-history blame fixtures remain open. |
-| US-008 Scale and Performance | Covered for current synthetic scale-policy slice plus AlgA scale-smoke/provider harnesses | Algorithm C UnitTesting and root CLI SysTesting cover empty-window zero metrics, documented reference-scale runtime/memory policy, explicit Algorithm C 200 GB streaming limitation, and genCodeDesc read-failure aborts with file context, recoverable filename-stem revision metadata, and no partial output. Algorithm A remote-preparation UnitTesting covers single-branch Git clone command construction to avoid fetching unrelated branches. UserTesting covers deterministic multi-file Algorithm A scale smoke and includes an opt-in hosted Git provider harness for real remote clone/blame verification when fixture env is configured. | Full 1K-commit/200 GB benchmark execution, true streaming implementation for AlgC, actually running provider-scale Algorithm A fixtures in CI, and measured memory ceilings remain open. |
+| US-008 Scale and Performance | Covered for current synthetic scale-policy slice plus AlgA scale-smoke/provider harnesses | Algorithm C UnitTesting and root CLI SysTesting cover empty-window zero metrics, documented reference-scale runtime/memory policy, explicit Algorithm C 1 GB baseline / 200 GB stress-envelope limitation, and genCodeDesc read-failure aborts with file context, recoverable filename-stem revision metadata, and no partial output. Algorithm A remote-preparation UnitTesting covers single-branch Git clone command construction to avoid fetching unrelated branches. UserTesting covers deterministic multi-file Algorithm A scale smoke and includes an opt-in hosted Git provider harness for real remote clone/blame verification when fixture env is configured. | Full 1K-commit/200 GB stress benchmark execution, true streaming implementation for AlgC, actually running provider-scale Algorithm A fixtures in CI, and measured memory ceilings remain open. |
 | US-009 Algorithm-Specific Behavior | Covered for current synthetic AlgA/AlgB/AlgC fixtures plus AlgA scale-smoke/provider harnesses | AlgA UnitTesting covers configurable `git blame` whitespace/rename/copy detection flags, explicit `git blame -M -C -C` invocation, v26.03 lookup by blame origin coordinates, real Git cross-file moved-line attribution, VCS access failure guidance, and branch-scoped Git clone preparation. Algorithm B tests cover add/delete/modify replay, multi-file/multi-hunk replay, pure rename, rename+modify, chained rename, final surviving snapshot, Git parent-before-child ordering, SVN numeric revision ordering, ordered patch artifact output, and missing patch directory diagnostics. AlgC UnitTesting covers add/delete surviving-set accumulation, duplicate add overwrite diagnostics, and SUMMARY/DETAIL mismatch warnings. Root CLI SysTesting covers AlgA VCS failure with no partial output, non-empty Algorithm A/C patch artifacts, and AlgC duplicate/mismatch diagnostics through `aggregateGenCodeDesc.py`. UserTesting covers the BASE-aligned AlgA workflow where endTime, not a public `--endRev`, selects the measured snapshot, Git remote auto-clone when `--repoPath` is omitted, SVN patch artifacts constrained to `[startTime, endTime]`, remote clone failure guidance with no partial output, multi-file local scale smoke, and opt-in hosted Git remote clone/blame output verification. | Actually running hosted-provider fixtures in CI, provider-backed outage simulation, and stress-scale Algorithm A/C fixtures remain open. |
-| US-010 Diagnostics and Logging | Covered for current diagnostics hardening slice | CLI supports UserGuide spelling for `--logLevel` plus existing uppercase aliases; SysTesting covers default INFO LOAD/PROCESS/SUMMARY logs, DEBUG algorithm/file/line detail, Algorithm A blame-origin DEBUG details, Algorithm B replay-origin DEBUG details, WARN continuation for SUMMARY/DETAIL mismatch, WARN duplicate last-wins and clock-skew ignore policy messages, structured ERROR logging for fatal clock skew and unreadable genCodeDesc files with recoverable filename-stem revision metadata, `--logLevel ERROR` suppression for successful runs, stdout final JSON metric result, and stderr/stdout separation. UnitTesting covers isolated programmatic logger configuration. | Real large-run log-volume behavior remains open. |
+| US-010 Diagnostics and Logging | Covered for current diagnostics hardening slice | CLI supports UserGuide spelling for `--logLevel` plus existing uppercase aliases and `--timing off/summary/detailed`; SysTesting covers default INFO LOAD/PROCESS/SUMMARY logs, DEBUG algorithm/file/line detail, Algorithm A blame-origin DEBUG details, Algorithm B replay-origin DEBUG details, WARN continuation for SUMMARY/DETAIL mismatch, WARN duplicate last-wins and clock-skew ignore policy messages, structured ERROR logging for fatal clock skew and unreadable genCodeDesc files with recoverable filename-stem revision metadata, `--logLevel ERROR` suppression for successful runs, stdout final JSON metric result, stderr/stdout separation, top-level `TIMING` output, timing-off suppression, and detailed timing stage logs. UnitTesting covers isolated programmatic logger configuration. | Real large-run log-volume behavior remains open. |
 
 ### Traceability Detail
 
 | Test Area | Test File | User Story Coverage |
 | --------- | --------- | ------------------- |
 | Metric core UnitTesting | [tests/UnitTesting/test_metric_core.py](tests/UnitTesting/test_metric_core.py) | US-001 / AC-001-1 through AC-001-6 |
-| Algorithm B UnitTesting | [tests/UnitTesting/test_algorithm_b.py](tests/UnitTesting/test_algorithm_b.py) | US-001 / AC-001-7, US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures, US-007 / AC-007-2 partial, US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures |
+| Algorithm B UnitTesting | [tests/UnitTesting/test_algorithm_b.py](tests/UnitTesting/test_algorithm_b.py) | US-001 / AC-001-7, US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures, US-007 / AC-007-2 partial, US-009 / AC-009-7 and AC-009-8 covered for synthetic replay fixtures |
 | Algorithm B Commit Workflow UnitTesting | [tests/UnitTesting/test_algorithm_b_us003.py](tests/UnitTesting/test_algorithm_b_us003.py) | US-003 / AC-003-1 through AC-003-6 covered for synthetic Algorithm B patch replay fixtures |
 | Algorithm B Line-Level UnitTesting | [tests/UnitTesting/test_algorithm_b_us004.py](tests/UnitTesting/test_algorithm_b_us004.py) | US-004 / AC-004-1 through AC-004-6 covered for synthetic Algorithm B patch replay fixtures |
 | Algorithm B Branch/History UnitTesting | [tests/UnitTesting/test_algorithm_b_us005.py](tests/UnitTesting/test_algorithm_b_us005.py) | US-005 / AC-005-1 through AC-005-5 covered for synthetic Algorithm B patch replay fixtures, including the AlgB replay-context limitation policy clarified in README_AlgABC |
 | Algorithm A Destructive UnitTesting | [tests/UnitTesting/test_algorithm_a_us006.py](tests/UnitTesting/test_algorithm_a_us006.py) | US-006 / AC-006-1 live Git blame revisions missing genCodeDesc are treated as Manual/genRatio 0 and surfaced in `missingRevisions` diagnostics |
 | Algorithm B Destructive UnitTesting | [tests/UnitTesting/test_algorithm_b_us006.py](tests/UnitTesting/test_algorithm_b_us006.py) | US-006 / AC-006-1 missing genCodeDesc patch revisions replayed as Manual/genRatio 0 for synthetic Algorithm B fixtures |
 | Algorithm B Git/SVN UnitTesting | [tests/UnitTesting/test_algorithm_b_us007.py](tests/UnitTesting/test_algorithm_b_us007.py) | US-007 / AC-007-1 through AC-007-5 covered for synthetic Algorithm B patch replay fixtures |
-| Algorithm A Algorithm-Specific UnitTesting | [tests/UnitTesting/test_algorithm_a_us009.py](tests/UnitTesting/test_algorithm_a_us009.py) | US-004 / AC-004-3 configurable blame whitespace policy, US-009 / AC-009-1 explicit `git blame -M` invocation, README_AlgABC Algorithm A origin-coordinate v26.03 join contract, AC-009-2 real Git cross-file moved-line attribution with `-C -C`, and AC-009-3 VCS access failure guidance |
+| Algorithm A Algorithm-Specific UnitTesting | [tests/UnitTesting/test_algorithm_a_us009.py](tests/UnitTesting/test_algorithm_a_us009.py) | US-004 / AC-004-3 configurable blame whitespace policy, US-009 / AC-009-1 explicit `git blame -M` invocation, AC-009-2 real Git cross-file moved-line attribution with `-C -C`, AC-009-3 VCS access failure guidance, and AC-009-4 origin-coordinate v26.03 join contract |
 | Algorithm A Remote CLI UnitTesting | [tests/UnitTesting/test_cli_algorithm_a_remote.py](tests/UnitTesting/test_cli_algorithm_a_remote.py) | US-008 remote preparation scale pressure and US-009 Algorithm A remote clone behavior covered for single-branch `git clone` command construction before live blame begins |
 | Algorithm C UnitTesting | [tests/UnitTesting/test_algorithm_c.py](tests/UnitTesting/test_algorithm_c.py) | US-006 / AC-006-1 missing parent chain-break rejection plus AC-006-4 parent/child clock-skew reject and ignore-policy diagnostics for AlgC |
 | Algorithm C Scale UnitTesting | [tests/UnitTesting/test_algorithm_c_us008.py](tests/UnitTesting/test_algorithm_c_us008.py) | US-008 / AC-008-1 through AC-008-3 covered for synthetic Algorithm C empty-window and scale-policy diagnostics |
-| Algorithm C Algorithm-Specific UnitTesting | [tests/UnitTesting/test_algorithm_c_us009.py](tests/UnitTesting/test_algorithm_c_us009.py) | US-009 / AC-009-7 add/delete surviving-set accumulation, AC-009-8 duplicate add overwrite diagnostics, and AC-009-9 SUMMARY/DETAIL mismatch warning propagation |
+| Algorithm C Algorithm-Specific UnitTesting | [tests/UnitTesting/test_algorithm_c_us009.py](tests/UnitTesting/test_algorithm_c_us009.py) | US-009 / AC-009-10 add/delete surviving-set accumulation, AC-009-11 duplicate add overwrite diagnostics, and AC-009-12 SUMMARY/DETAIL mismatch warning propagation |
 | Diagnostics UnitTesting | [tests/UnitTesting/test_diagnostics.py](tests/UnitTesting/test_diagnostics.py) | US-010 / AC-010-7 programmatic logger configuration without CLI state leakage |
 | Protocol loader UnitTesting | [tests/UnitTesting/test_protocol_loader.py](tests/UnitTesting/test_protocol_loader.py) | JSONC loading regression; not yet mapped to a formal user-story AC |
 | Protocol Validation UnitTesting | [tests/UnitTesting/test_protocol_validation_us006.py](tests/UnitTesting/test_protocol_validation_us006.py) | US-006 / AC-006-2 and AC-006-5 validation breadth for required top-level fields, required object/list/integer types, BASE v26.03 optional doc counters and optional Git `vcsType`, `DETAIL[]` code/doc collection presence, v26.03 line locations and ranges, sparse manual-line summary/detail policy, expanded generated-count warnings, v26.04 add-entry blame timestamps, and strict production Git/SVN revision ID validation |
-| CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7, AC-001-8; US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures; US-007 / AC-007-2 partial; US-009 / AC-009-4 and AC-009-5 covered for synthetic replay fixtures and AC-009-6 partial |
+| CLI SysTesting | [tests/SysTesting/test_cli_us001.py](tests/SysTesting/test_cli_us001.py) | US-001 / AC-001-1, AC-001-2, AC-001-3, AC-001-6, AC-001-7, AC-001-8, AC-001-9; US-002 / AC-002-1 through AC-002-4 covered for synthetic AlgB fixtures; US-007 / AC-007-2 partial; US-009 / AC-009-7 and AC-009-8 covered for synthetic replay fixtures and AC-009-9 partial |
 | CLI Commit Workflow SysTesting | [tests/SysTesting/test_cli_us003.py](tests/SysTesting/test_cli_us003.py) | US-003 / AC-003-5 and AC-003-6 covered for root CLI Algorithm B patch-history orphan handling |
 | CLI Line-Level SysTesting | [tests/SysTesting/test_cli_us004.py](tests/SysTesting/test_cli_us004.py) | US-004 / AC-004-1, AC-004-2, and AC-004-3 covered for root CLI Algorithm B output and diagnostics policy |
 | CLI Branch/History SysTesting | [tests/SysTesting/test_cli_us005.py](tests/SysTesting/test_cli_us005.py) | US-005 / AC-005-2 and AC-005-5 covered for root CLI Algorithm B output and diagnostics policy |
 | CLI Validation SysTesting | [tests/SysTesting/test_cli_us006.py](tests/SysTesting/test_cli_us006.py) | US-006 / AC-006-1 Algorithm A live missing-record diagnostics, Algorithm B missing-record manual replay and abort policy, and Algorithm C missing-chain rejection; AC-006-2; AC-006-3 fatal-reject and last-wins warning policies; AC-006-4 reject and ignore policies; AC-006-5; AC-006-6 mandatory and optional UserGuide CLI flag coverage; corrupted JSON, missing required SUMMARY, and invalid SUMMARY count rejection with no partial output; US-010 / AC-010-4, AC-010-5, and AC-010-6 partial structured ERROR/WARN coverage; UserGuide A/C patch artifact contract partial coverage |
 | CLI Git/SVN SysTesting | [tests/SysTesting/test_cli_us007.py](tests/SysTesting/test_cli_us007.py) | US-007 / AC-007-1 through AC-007-5 covered for root CLI Algorithm B output, warnings, and diagnostics policy; US-007 / AC-007-2 and AC-007-3 covered for real local SVN Algorithm A blame through `aggregateGenCodeDesc.py` |
-| CLI Scale SysTesting | [tests/SysTesting/test_cli_us008.py](tests/SysTesting/test_cli_us008.py) | US-008 / AC-008-1 through AC-008-4 and US-010 / AC-010-4 covered for root CLI Algorithm C empty-window output, scale diagnostics, and I/O failure abort behavior with recoverable revision metadata |
-| CLI Algorithm-Specific SysTesting | [tests/SysTesting/test_cli_us009.py](tests/SysTesting/test_cli_us009.py) | US-009 / AC-009-3 root CLI Algorithm A VCS failure guidance and no partial output, AC-009-8 duplicate add diagnostics, and AC-009-9 SUMMARY/DETAIL mismatch warnings through `aggregateGenCodeDesc.py` |
-| CLI Diagnostics SysTesting | [tests/SysTesting/test_cli_us010.py](tests/SysTesting/test_cli_us010.py) | US-010 / AC-010-1, AC-010-2, AC-010-3, AC-010-5, and AC-010-6 covered for synthetic Algorithm A/B/C CLI paths, including stdout final metric result and AlgA/AlgB origin-detail DEBUG logs |
+| CLI Scale SysTesting | [tests/SysTesting/test_cli_us008.py](tests/SysTesting/test_cli_us008.py) | US-008 / AC-008-1, AC-008-3, AC-008-4, AC-008-5 and US-010 / AC-010-4 covered for root CLI Algorithm C empty-window output, scale diagnostics, and I/O failure abort behavior with recoverable revision metadata |
+| CLI Algorithm-Specific SysTesting | [tests/SysTesting/test_cli_us009.py](tests/SysTesting/test_cli_us009.py) | US-009 / AC-009-3 root CLI Algorithm A VCS failure guidance and no partial output, AC-009-11 duplicate add diagnostics, and AC-009-12 SUMMARY/DETAIL mismatch warnings through `aggregateGenCodeDesc.py` |
+| CLI Diagnostics SysTesting | [tests/SysTesting/test_cli_us010.py](tests/SysTesting/test_cli_us010.py) | US-010 / AC-010-1, AC-010-2, AC-010-3, AC-010-5, AC-010-6, and AC-010-8 covered for synthetic Algorithm A/B/C CLI paths, including stdout final metric result, AlgA/AlgB origin-detail DEBUG logs, timing summary output, timing-off suppression, and detailed timing stage logs |
 | Algorithm A UserTesting | [tests/UserTesting/test_algorithm_a_user_workflow.py](tests/UserTesting/test_algorithm_a_user_workflow.py) | README_UserGuide Algorithm A local/remote Git and local SVN maintainer workflows without public `--endRev`; US-001 / AC-001-8 alive-at-endTime subset; US-005 / AC-005-4 shallow Git history warning; US-007 SVN endTime revision selection and patch-window behavior; US-009 Algorithm A live blame snapshot selection, Git remote auto-clone without `--repoPath`, and remote clone failure with no partial output; CLI help contract after BASE `--endRev` removal |
 | Algorithm A Scale-Smoke UserTesting | [tests/UserTesting/test_algorithm_a_scale_smoke.py](tests/UserTesting/test_algorithm_a_scale_smoke.py) | US-001 aggregate correctness, US-008 Algorithm A scale-smoke readiness, and US-009 multi-file live Git blame/patch output behavior covered for a configurable local fixture |
 | Algorithm A Hosted Provider UserTesting | [tests/UserTesting/test_algorithm_a_hosted_provider.py](tests/UserTesting/test_algorithm_a_hosted_provider.py) | US-008 provider-scale readiness and US-009 hosted Git Algorithm A remote clone/blame/output behavior covered as an opt-in fixture driven by `AGGREGATE_GCD_HOSTED_GIT_*` environment variables |
@@ -912,7 +994,7 @@ Last verified: 2026-05-07 with `git diff --check` and full VS Code test run (`12
 3. **RED** — write a failing test from the GIVEN/WHEN/THEN scenario.
 4. **GREEN** — implement minimal code to pass.
 5. **REFACTOR** — clean up.
-6. When all 60 ACs pass → your implementation is correct per the BASE specification.
+6. When all 66 ACs pass → your implementation is correct per the BASE specification.
 
 > **Not every AC applies to every fork.** Git-only conditions (rebase, amend, shallow clone)
 > can be skipped by SVN forks. AlgC-specific ACs can be skipped by AlgA-only forks.

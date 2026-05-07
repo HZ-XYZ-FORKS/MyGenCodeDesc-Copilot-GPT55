@@ -117,7 +117,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_ignores_amended_revision_absent_
     completed = _run_algorithm_b(gen_code_desc_dir, commit_patch_dir, output_dir)
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.4
     assert aggregate["AGGREGATE"]["diagnostics"]["orphanedRevisions"] == ["aaa"]
     assert "aaa.patch" not in (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
@@ -143,7 +143,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_uses_rebased_revision_ids_from_p
     completed = _run_algorithm_b(gen_code_desc_dir, commit_patch_dir, output_dir)
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 1.0
     assert aggregate["AGGREGATE"]["diagnostics"]["orphanedRevisions"] == ["old-c1", "old-c2"]
     patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")

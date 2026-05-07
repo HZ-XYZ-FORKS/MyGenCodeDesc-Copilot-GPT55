@@ -86,6 +86,7 @@
 | `--blameWhitespace` | `respect` | **仅 Alg A + Git。** `respect` 或 `ignore`（对应 `git blame -w`），见 AC-004-3。 |
 | `--renameDetection` | `basic` | **仅 Git + Alg A/B。** `off` / `basic`（`-M`）/ `aggressive`（`-M -C -C`）。 |
 | `--logLevel` | `Info` | stderr 日志详细程度：`Debug` / `Info` / `Warning` / `Error`，见 §2.5。 |
+| `--timing` | `summary` | 耗时输出策略：`off`、`summary` 或 `detailed`，见 §2.6 和 §3.1 的 `TIMING`。 |
 | `--onMissing` | 算法相关 | 缺失 genCodeDesc 的处理策略，见 §2.2。 |
 | `--onDuplicate` | `reject` | 重复 revisionId 的处理策略，见 §2.2。 |
 | `--onClockSkew` | `abort` | 仅 Alg C 的时钟漂移处理策略，见 §2.2。 |
@@ -113,22 +114,46 @@
 | `Warning` | 只打 warning 和 error（缺 revision、revision 重复、时钟漂移、版本混用、降级结果）。不打任何按文件、按行的内容。 |
 | `Error` | 只打导致处理中止的致命错误。 |
 
+### 2.6 `--timing` 语义
+
+Timing 使用单调 wall-clock 计时，并以非负小数秒输出。Timing 只用于可观测性：绝不能改变指标计算、过滤或行归因。
+
+| 取值 | 行为 |
+| --- | --- |
+| `off` | 聚合 JSON 不输出 `TIMING`，日志也不输出 timing summary。 |
+| `summary`（默认） | 在聚合 JSON 中输出稳定的顶层 `TIMING` object，并在最终日志里输出一条 timing summary。 |
+| `detailed` | 包含 `summary` 的所有内容，并在 stderr 日志里输出 clone/fetch/checkout、blame、diff replay、genCodeDesc loading、aggregation、output writing 等阶段耗时。 |
+
+标准 `TIMING` 阶段名如下：
+
+| 字段 | 含义 |
+| --- | --- |
+| `totalSeconds` | 参数解析后到成功写完输出或报告 fatal error 的端到端耗时。 |
+| `cloneRepoSeconds` | 自动 clone、fetch 或 checkout 远端仓库的耗时；未使用时为 `0`。 |
+| `checkoutSeconds` | 准备干净 `endTime` 快照或隔离 worktree 的耗时。 |
+| `loadGenCodeDescSeconds` | 发现、读取、解析、校验 genCodeDesc 文件的耗时。 |
+| `blameSeconds` | 运行实时 `git blame` / `svn blame` 命令的耗时。仅 Alg A 使用；Alg B/C 为 `0`。 |
+| `diffSeconds` | 生成或重放 diff/patch 的耗时。 |
+| `aggregateSeconds` | 将行来源 join 到 genCodeDesc 条目并计算聚合指标的耗时。 |
+| `writeOutputSeconds` | 写出 `aggregatedGenCodeDescV26.03.json` 和 `commitStart2EndTime.patch` 的耗时。 |
+| `notRun` | 被所选算法或访问模式跳过的阶段名数组，例如 `cloneRepo`、`blame` 或 `diff`。 |
+
 ---
 
 ## 3. 输出
 
-`outputDir` 里会放 **两个产物**：
+当传入 `--outputDir` 时，`outputDir` 里会放 **两个产物**：
 
 | 文件（固定名称） | 是什么 |
 |---|---|
-| `genCodeDescV26.03.json` | 聚合结果，形状跟 genCodeDescProtoV26.03 一样（§3.1）。 |
+| `aggregatedGenCodeDescV26.03.json` | 基于 genCodeDescProtoV26.03 JSON 形状的聚合结果（§3.1）。 |
 | `commitStart2EndTime.patch` | `repoBranch` 上 `[startTime, endTime]` 的单个累积 unified diff（§3.2）。 |
 
 两个文件 **Alg A / B / C 都会生成**。
 
-### 3.1 `genCodeDescV26.03.json`
+### 3.1 `aggregatedGenCodeDescV26.03.json`
 
-形状跟 **[`Protocols/genCodeDescProtoV26.03.json`](Protocols/genCodeDescProtoV26.03.json)** 一样——字段名同、SUMMARY / DETAIL / REPOSITORY 结构同。聚合结果复用这个协议，这样已经能读版本级 genCodeDesc 的下游工具不用改就能读聚合结果。
+这个输出基于 **[`Protocols/genCodeDescProtoV26.03.json`](Protocols/genCodeDescProtoV26.03.json)**——字段名同、SUMMARY / DETAIL / REPOSITORY 结构同。`aggregated...` 文件名把窗口级聚合产物和单 revision 的 genCodeDesc 记录区分开，同时保持下游工具对 v26.03 形状 JSON 的兼容性。
 
 度量 → 协议字段映射：
 
@@ -155,6 +180,7 @@
 | `AGGREGATE.metrics.fullyAI` | `{value, numerator}` — `fullGeneratedCodeLines / totalCodeLines`。 |
 | `AGGREGATE.metrics.mostlyAI` | `{value, numerator, threshold}` — `count(genRatio >= T) / totalCodeLines`。 |
 | `AGGREGATE.diagnostics` | `{missingRevisions[], duplicateRevisions[], clockSkewDetected, warnings[]}`。 |
+| `TIMING` | 当 `--timing != off` 时输出的可选顶层 timing summary：`{totalSeconds, cloneRepoSeconds, checkoutSeconds, loadGenCodeDescSeconds, blameSeconds, diffSeconds, aggregateSeconds, writeOutputSeconds, notRun[]}`。 |
 
 例子（窗口内 10 行活代码，已生成行的 `genRatio = [100,100,100,100,100, 80,80,80, 30]`，另有 1 行省略的人写行，有效 `genRatio=0`，阈值 60）：
 
@@ -213,6 +239,17 @@
       "clockSkewDetected": false,
       "warnings": []
     }
+  },
+  "TIMING": {
+    "totalSeconds": 12.384,
+    "cloneRepoSeconds": 0.0,
+    "checkoutSeconds": 0.0,
+    "loadGenCodeDescSeconds": 1.122,
+    "blameSeconds": 0.0,
+    "diffSeconds": 0.0,
+    "aggregateSeconds": 10.734,
+    "writeOutputSeconds": 0.082,
+    "notRun": ["cloneRepo", "checkout", "blame", "diff"]
   }
 }
 ```
@@ -430,4 +467,4 @@ aggregateGenCodeDesc \
     - 12 个组合中哪些已支持（目标是全部 12 个；仅支持 Alg C 的 fork 可以跳过第 1、2、7、8 格）。
     - 每个组合的已知局限（如"Alg B 尚未实现"）。
     - `--onMissing`、`--onDuplicate`、`--onClockSkew` 的默认策略。
-4. [README_UserStories_ZH.md](README_UserStories_ZH.md) 里的全部 60 条验收标准都是测试目标。
+4. [README_UserStories_ZH.md](README_UserStories_ZH.md) 里的全部 66 条验收标准都是测试目标。

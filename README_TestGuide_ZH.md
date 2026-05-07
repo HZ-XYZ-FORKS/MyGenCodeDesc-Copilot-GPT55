@@ -179,8 +179,8 @@ TC-Sys-001:
 | Algorithm A | 使用 v26.03 输入，对本地 Git 仓库执行实时 blame。 |
 | Algorithm B | 使用 `commitPatchDir` 和 v26.03 输入进行离线 diff 回放。 |
 | Algorithm C | 使用 v26.04 输入进行内嵌 blame 回放，且不访问活 VCS。 |
-| 输出产物 | 同时生成 `genCodeDescV26.03.json` 和 `commitStart2EndTime.patch`。 |
-| 输出 schema | 聚合 JSON 遵循 v26.03 外壳并包含 `AGGREGATE` 扩展。 |
+| 输出产物 | 同时生成 `aggregatedGenCodeDescV26.03.json` 和 `commitStart2EndTime.patch`。 |
+| 输出 schema | 聚合 JSON 遵循 v26.03 外壳并包含 `AGGREGATE` 和可选 `TIMING` 扩展。 |
 | 诊断 | 正确输出缺失版本、重复版本、混合版本、时钟偏移和 warning。 |
 | 仓库行为 | 根据适用情况覆盖 rename、delete、copy、merge、squash、cherry-pick、revert、rebase/force-push。 |
 | Scope 行为 | Scope A/B/C/D 过滤器会一致地改变分母和输出。 |
@@ -207,7 +207,7 @@ patch 产物和 JSON 指标使用同一个时间窗口和 scope，但回答不�
 | `TC-Sys-WindowDiffDeletedFile` | `[@AC-002-3,US-002]` | 已删除行可以作为删除内容出现在窗口 diff 中，但对存活代码度量贡献为零。 |
 | `TC-Sys-WindowDiffRevertedLines` | `[@AC-003-4,US-003]` | 被 revert 的行在窗口历史中可见，但不在 `endTime` 的存活快照中。 |
 | `TC-Sys-PreWindowAliveLineExcluded` | `[@AC-005-1,US-005]` | `startTime` 之前提交的行即使在 `endTime` 仍存活，也不进入窗口内分母。 |
-| `TC-Sys-DiffPatchAndJsonAgreeOnScope` | `[@AC-001-8,US-001]` | `commitStart2EndTime.patch` 和 `genCodeDescV26.03.json` 使用同一个时间窗口和 scope 过滤器，但 JSON 分母只聚合 diff 的存活子集。 |
+| `TC-Sys-DiffPatchAndJsonAgreeOnScope` | `[@AC-001-8,US-001]` | `commitStart2EndTime.patch` 和 `aggregatedGenCodeDescV26.03.json` 使用同一个时间窗口和 scope 过滤器，但 JSON 分母只聚合 diff 的存活子集。 |
 
 如果测试只检查 patch 文件存在，这是不够的。它还必须证明 JSON 指标来自 `(startTime..endTime diff) ∩ (endTime 仍存活)`，而不是直接来自原始 added/deleted diff 行，也不是来自仓库里所有存活行。
 

@@ -277,7 +277,7 @@ def _run_root_cli(args, output_dir):
 
 
 def _assert_no_partial_outputs(output_dir):
-    assert not (output_dir / "genCodeDescV26.03.json").exists()
+    assert not (output_dir / "aggregatedGenCodeDescV26.03.json").exists()
     assert not (output_dir / "commitStart2EndTime.patch").exists()
 
 
@@ -295,7 +295,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_replays_missing_gen_code_desc_pa
     completed = _run_algorithm_b(gen_code_desc_dir, commit_patch_dir, output_dir)
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 2
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.5
@@ -343,7 +343,7 @@ def test_aggregate_gen_code_desc_py_algorithm_a_marks_missing_live_blame_revisio
     completed = _run_algorithm_a(gen_code_desc_dir, repo_path, missing_revision, output_dir)
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 2
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.5
@@ -434,7 +434,7 @@ def test_aggregate_gen_code_desc_py_accepts_duplicate_revision_ids_with_last_win
 
     assert completed.returncode == 0, completed.stderr
     assert "duplicate revisionId abc123 accepted by last-wins policy" in completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["partialGeneratedCodeLines"] == 1
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.4
 
@@ -612,7 +612,7 @@ def test_aggregate_gen_code_desc_py_warns_and_continues_when_clock_skew_policy_i
 
     assert completed.returncode == 0, completed.stderr
     assert "clock skew ignored by policy" in completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["AGGREGATE"]["diagnostics"]["clockSkewDetected"] is True
     patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
     assert "# algorithm: C" in patch_text
@@ -630,4 +630,4 @@ def test_aggregate_gen_code_desc_py_log_level_error_suppresses_success_logs(tmp_
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stderr == ""
-    assert (output_dir / "genCodeDescV26.03.json").exists()
+    assert (output_dir / "aggregatedGenCodeDescV26.03.json").exists()

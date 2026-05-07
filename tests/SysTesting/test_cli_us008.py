@@ -85,7 +85,7 @@ def _run_algorithm_c(gen_code_desc_dir, output_dir):
 
 
 def _assert_no_partial_outputs(output_dir):
-    assert not (output_dir / "genCodeDescV26.03.json").exists()
+    assert not (output_dir / "aggregatedGenCodeDescV26.03.json").exists()
     assert not (output_dir / "commitStart2EndTime.patch").exists()
 
 
@@ -99,7 +99,7 @@ def test_aggregate_gen_code_desc_py_algorithm_c_empty_window_outputs_zero_metric
     completed = _run_algorithm_c(gen_code_desc_dir, output_dir)
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 0
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.0
     assert aggregate["AGGREGATE"]["metrics"]["fullyAI"]["value"] == 0.0

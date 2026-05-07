@@ -86,6 +86,7 @@ All other CLI arguments are optional, or are used only when the selected mode, a
 | `--blameWhitespace` | `respect` | **Alg A, Git only.** `respect` or `ignore` (cf. `git blame -w`). See AC-004-3. |
 | `--renameDetection` | `basic` | **Alg A/B, Git only.** `off` / `basic` (`-M`) / `aggressive` (`-M -C -C`). |
 | `--logLevel` | `Info` | Stderr logging verbosity: `Debug`, `Info`, `Warning`, `Error`. See §2.5. |
+| `--timing` | `summary` | Timing output policy: `off`, `summary`, or `detailed`. See §2.6 and `TIMING` in §3.1. |
 | `--onMissing` | Alg-dependent | Missing genCodeDesc policy. See §2.2. |
 | `--onDuplicate` | `reject` | Duplicate revisionId policy. See §2.2. |
 | `--onClockSkew` | `abort` | Clock skew policy for Alg C. See §2.2. |
@@ -113,22 +114,46 @@ Protocol version is auto-detected from the first file in `genCodeDescDir`; all f
 | `Warning` | Only warnings and errors (missing/duplicate revisions, clock skew, mixed versions, degraded results). No per-file or per-line output. |
 | `Error` | Only fatal errors that abort processing. |
 
+### 2.6 `--timing` semantics
+
+Timing uses monotonic wall-clock measurement and reports seconds as non-negative decimal numbers. Timing is for observability only: it must never change metric math, filtering, or line attribution.
+
+| Value | Behavior |
+| --- | --- |
+| `off` | Do not emit `TIMING` in the aggregate JSON and do not emit timing summary logs. |
+| `summary` (default) | Emit a stable top-level `TIMING` object in the aggregate JSON and include one final timing summary log line. |
+| `detailed` | Everything in `summary`, plus per-stage timing records in stderr logs for clone/fetch/checkout, blame, diff replay, genCodeDesc loading, aggregation, and output writing. |
+
+Standard `TIMING` stage names are:
+
+| Field | Meaning |
+| --- | --- |
+| `totalSeconds` | End-to-end process time after argument parsing through successful output write or fatal error reporting. |
+| `cloneRepoSeconds` | Time spent auto-cloning, fetching, or checking out a remote repository. `0` when not used. |
+| `checkoutSeconds` | Time spent preparing the clean `endTime` snapshot or isolated worktree. |
+| `loadGenCodeDescSeconds` | Time spent discovering, reading, parsing, and validating genCodeDesc files. |
+| `blameSeconds` | Time spent in live `git blame` / `svn blame` commands. Alg A only; `0` for Alg B/C. |
+| `diffSeconds` | Time spent generating or replaying diffs/patches. |
+| `aggregateSeconds` | Time spent joining line origins to genCodeDesc entries and computing aggregate metrics. |
+| `writeOutputSeconds` | Time spent writing `aggregatedGenCodeDescV26.03.json` and `commitStart2EndTime.patch`. |
+| `notRun` | Array of stage names skipped by the selected algorithm or access mode, such as `cloneRepo`, `blame`, or `diff`. |
+
 ---
 
 ## 3. Output
 
-`outputDir` receives **two artifacts**:
+When `--outputDir` is provided, `outputDir` receives **two artifacts**:
 
 | File (fixed name) | What it is |
 |---|---|
-| `genCodeDescV26.03.json` | Aggregate result in genCodeDescProtoV26.03-shaped JSON (§3.1). |
+| `aggregatedGenCodeDescV26.03.json` | Aggregate result based on the genCodeDescProtoV26.03 JSON shape (§3.1). |
 | `commitStart2EndTime.patch` | Single cumulative unified diff covering `[startTime, endTime]` on `repoBranch` (§3.2). |
 
 Both files are produced by **all three algorithms** (A / B / C).
 
-### 3.1 `genCodeDescV26.03.json`
+### 3.1 `aggregatedGenCodeDescV26.03.json`
 
-Shape follows **[`Protocols/genCodeDescProtoV26.03.json`](Protocols/genCodeDescProtoV26.03.json)** — same field names, same SUMMARY / DETAIL / REPOSITORY structure. The aggregate result reuses the protocol so downstream consumers that already understand a per-revision genCodeDesc record also understand the aggregate.
+This output is based on **[`Protocols/genCodeDescProtoV26.03.json`](Protocols/genCodeDescProtoV26.03.json)** — same field names, same SUMMARY / DETAIL / REPOSITORY structure. The `aggregated...` filename distinguishes this window-level artifact from a per-revision genCodeDesc record, while preserving compatibility for downstream consumers that already understand v26.03-shaped JSON.
 
 Mapping from metric to protocol fields:
 
@@ -155,6 +180,7 @@ Mapping from metric to protocol fields:
 | `AGGREGATE.metrics.fullyAI` | `{value, numerator}` — `fullGeneratedCodeLines / totalCodeLines`. |
 | `AGGREGATE.metrics.mostlyAI` | `{value, numerator, threshold}` — `count(genRatio >= T) / totalCodeLines`. |
 | `AGGREGATE.diagnostics` | `{missingRevisions[], duplicateRevisions[], clockSkewDetected, warnings[]}`. |
+| `TIMING` | Optional top-level timing summary emitted when `--timing != off`: `{totalSeconds, cloneRepoSeconds, checkoutSeconds, loadGenCodeDescSeconds, blameSeconds, diffSeconds, aggregateSeconds, writeOutputSeconds, notRun[]}`. |
 
 Example (10 in-window live code lines, generated `genRatio = [100,100,100,100,100, 80,80,80, 30]`, plus one omitted manual line with effective `genRatio=0`, threshold 60):
 
@@ -213,6 +239,17 @@ Example (10 in-window live code lines, generated `genRatio = [100,100,100,100,10
       "clockSkewDetected": false,
       "warnings": []
     }
+  },
+  "TIMING": {
+    "totalSeconds": 12.384,
+    "cloneRepoSeconds": 0.0,
+    "checkoutSeconds": 0.0,
+    "loadGenCodeDescSeconds": 1.122,
+    "blameSeconds": 0.0,
+    "diffSeconds": 0.0,
+    "aggregateSeconds": 10.734,
+    "writeOutputSeconds": 0.082,
+    "notRun": ["cloneRepo", "checkout", "blame", "diff"]
   }
 }
 ```
@@ -430,4 +467,4 @@ aggregateGenCodeDesc \
     - Which of the 12 cells are supported (all 12 is the target; AlgC-only forks may skip cells 1–2, 7–8).
     - Known limitations per cell (e.g. "Alg B is not yet implemented").
     - Policy defaults for `--onMissing`, `--onDuplicate`, `--onClockSkew`.
-4. All 60 acceptance criteria in [README_UserStories.md](README_UserStories.md) are test targets.
+4. All 66 acceptance criteria in [README_UserStories.md](README_UserStories.md) are test targets.

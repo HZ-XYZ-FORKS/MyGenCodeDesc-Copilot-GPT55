@@ -152,7 +152,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_accepts_git_sha1_and_sha256_revi
     completed = _run_algorithm_b(gen_code_desc_dir, commit_patch_dir, output_dir)
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["SUMMARY"]["totalCodeLines"] == 2
     assert aggregate["AGGREGATE"]["metrics"]["weighted"]["value"] == 0.7
     assert "40-character" in aggregate["AGGREGATE"]["diagnostics"]["vcsPolicy"]["gitRevisionIdFormat"]
@@ -187,7 +187,7 @@ def test_aggregate_gen_code_desc_py_algorithm_b_normalizes_svn_branch_and_logs_s
 
     assert completed.returncode == 0, completed.stderr
     assert "SVN blame may attribute" in completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["REPOSITORY"]["vcsType"] == "svn"
     assert aggregate["SUMMARY"]["totalCodeLines"] == 2
     assert "skipped for SVN" in aggregate["AGGREGATE"]["diagnostics"]["vcsPolicy"]["gitOnlyHistoryRewrites"]
@@ -226,7 +226,7 @@ def test_aggregate_gen_code_desc_py_algorithm_a_uses_real_svn_blame_for_local_wo
     completed = _run_algorithm_a_svn(gen_code_desc_dir, working_copy_path, output_dir)
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     assert aggregate["REPOSITORY"]["vcsType"] == "svn"
     assert aggregate["SUMMARY"]["totalCodeLines"] == 1
     assert aggregate["SUMMARY"]["fullGeneratedCodeLines"] == 1

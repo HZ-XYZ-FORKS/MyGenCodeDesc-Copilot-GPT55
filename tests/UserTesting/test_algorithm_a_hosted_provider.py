@@ -132,7 +132,7 @@ def test_alg_a_hosted_provider_fixture_runs_remote_blame_when_configured(tmp_pat
     )
 
     assert completed.returncode == 0, completed.stderr
-    aggregate = json.loads((output_dir / "genCodeDescV26.03.json").read_text(encoding="utf-8"))
+    aggregate = json.loads((output_dir / "aggregatedGenCodeDescV26.03.json").read_text(encoding="utf-8"))
     patch_text = (output_dir / "commitStart2EndTime.patch").read_text(encoding="utf-8")
     assert aggregate["REPOSITORY"]["repoURL"] == fixture["AGGREGATE_GCD_HOSTED_GIT_REPO_URL"]
     assert aggregate["SUMMARY"]["totalCodeLines"] >= 1

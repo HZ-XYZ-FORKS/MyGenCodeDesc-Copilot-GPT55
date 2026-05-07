@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Iterator
 from urllib.parse import unquote, urlparse
@@ -35,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--onMissing", choices=["abort", "zero", "skip", "ignore"])
     parser.add_argument("--onDuplicate", choices=["reject", "last-wins"], default="reject")
     parser.add_argument("--onClockSkew", choices=["abort", "ignore"], default="abort")
+    parser.add_argument("--timing", choices=["off", "summary", "detailed"], default="summary")
     parser.add_argument(
         "--logLevel",
         choices=["Debug", "Info", "Warning", "Error", "DEBUG", "INFO", "WARN", "WARNING", "ERROR"],
@@ -48,11 +50,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     logger = Logger(args.logLevel, stream=sys.stderr)
+    timing = _TimingCollector(args.timing)
 
     try:
         logger.debug("CLI", f"algorithm={args.algorithm} scope={args.scope}")
+        algorithm_started = timing.start()
         if args.algorithm == "A":
-            with _algorithm_a_repo_path(args.repoUrl, args.repoPath, args.repoBranch) as repo_path:
+            with _algorithm_a_repo_path(args.repoUrl, args.repoPath, args.repoBranch, timing) as repo_path:
                 algorithm_result = collect_algorithm_a_lines(
                     gen_code_desc_dir=Path(args.genCodeDescDir),
                     repo_url=args.repoUrl,
@@ -92,25 +96,35 @@ def main(argv: list[str] | None = None) -> int:
                 on_missing=args.onMissing or "zero",
                 on_duplicate=args.onDuplicate,
             )
+        timing.record_algorithm_collection(args.algorithm, timing.elapsed_since(algorithm_started))
         _emit_load_logs(logger, algorithm_result.diagnostics)
-        metrics = calculate_metrics(algorithm_result.lines, threshold=args.threshold)
-        aggregate_record = build_aggregate_record(
-            lines=algorithm_result.lines,
-            metrics=metrics,
-            repo_url=args.repoUrl,
-            repo_branch=args.repoBranch,
-            start_time=args.startTime,
-            end_time=args.endTime,
-            algorithm=args.algorithm,
-            scope=args.scope,
-            threshold=args.threshold,
-            input_protocol_version=algorithm_result.input_protocol_version,
-            vcs_type=algorithm_result.vcs_type,
-            diagnostics=algorithm_result.diagnostics,
-        )
+        with timing.measure("aggregateSeconds"):
+            metrics = calculate_metrics(algorithm_result.lines, threshold=args.threshold)
+            aggregate_record = build_aggregate_record(
+                lines=algorithm_result.lines,
+                metrics=metrics,
+                repo_url=args.repoUrl,
+                repo_branch=args.repoBranch,
+                start_time=args.startTime,
+                end_time=args.endTime,
+                algorithm=args.algorithm,
+                scope=args.scope,
+                threshold=args.threshold,
+                input_protocol_version=algorithm_result.input_protocol_version,
+                vcs_type=algorithm_result.vcs_type,
+                diagnostics=algorithm_result.diagnostics,
+            )
         _emit_process_logs(logger, args.algorithm, algorithm_result.lines, algorithm_result.diagnostics)
-        write_outputs(Path(args.outputDir), aggregate_record, patch_text=getattr(algorithm_result, "patch_text", ""))
+        if timing.enabled:
+            aggregate_record["TIMING"] = timing.summary()
+        with timing.measure("writeOutputSeconds"):
+            write_outputs(Path(args.outputDir), aggregate_record, patch_text=getattr(algorithm_result, "patch_text", ""))
+        final_timing = timing.summary() if timing.enabled else None
+        if final_timing is not None:
+            aggregate_record["TIMING"] = final_timing
+            write_outputs(Path(args.outputDir), aggregate_record, patch_text=getattr(algorithm_result, "patch_text", ""))
         _emit_summary_logs(logger, algorithm_result.lines, metrics, args.threshold)
+        _emit_timing_logs(logger, args.timing, final_timing)
         print(json.dumps(_build_stdout_metric_result(metrics, args.threshold), sort_keys=True))
     except Exception as error:
         logger.error("CLI", f"aggregateGenCodeDesc: {error}")
@@ -120,7 +134,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 @contextlib.contextmanager
-def _algorithm_a_repo_path(repo_url: str, repo_path_arg: str | None, repo_branch: str) -> Iterator[Path]:
+def _algorithm_a_repo_path(
+    repo_url: str, repo_path_arg: str | None, repo_branch: str, timing: "_TimingCollector"
+) -> Iterator[Path]:
     if repo_path_arg is not None:
         yield Path(repo_path_arg)
         return
@@ -132,7 +148,8 @@ def _algorithm_a_repo_path(repo_url: str, repo_path_arg: str | None, repo_branch
 
     with tempfile.TemporaryDirectory(prefix="aggregateGenCodeDesc-algA-") as temp_dir:
         clone_path = Path(temp_dir) / "repo"
-        _clone_git_repo(repo_url, repo_branch, clone_path)
+        with timing.measure("cloneRepoSeconds"):
+            _clone_git_repo(repo_url, repo_branch, clone_path)
         yield clone_path
 
 
@@ -234,6 +251,18 @@ def _emit_summary_logs(logger: Logger, lines: list[GenerationLine], metrics: Agg
     logger.info("SUMMARY", f"SUMMARY aggregate {_format_metrics(metrics)}")
 
 
+def _emit_timing_logs(logger: Logger, timing_policy: str, timing_summary: dict[str, object] | None) -> None:
+    if timing_policy == "off" or timing_summary is None:
+        return
+    if timing_policy == "detailed":
+        for field_name in _TimingCollector.DURATION_FIELDS[1:]:
+            logger.info("TIMING", f"TIMING stage={field_name} seconds={float(timing_summary[field_name]):.6f}")
+    logger.info(
+        "TIMING",
+        f"TIMING totalSeconds={float(timing_summary['totalSeconds']):.6f} notRun={','.join(timing_summary['notRun'])}",
+    )
+
+
 def _lines_by_file(lines: list[GenerationLine]) -> dict[str, list[GenerationLine]]:
     file_groups: dict[str, list[GenerationLine]] = {}
     for line in lines:
@@ -262,6 +291,68 @@ def _build_stdout_metric_result(metrics: AggregateMetrics, threshold: int) -> di
             "threshold": threshold,
         },
     }
+
+
+class _TimingCollector:
+    DURATION_FIELDS = (
+        "totalSeconds",
+        "cloneRepoSeconds",
+        "checkoutSeconds",
+        "loadGenCodeDescSeconds",
+        "blameSeconds",
+        "diffSeconds",
+        "aggregateSeconds",
+        "writeOutputSeconds",
+    )
+    STAGE_LABELS = {
+        "cloneRepoSeconds": "cloneRepo",
+        "checkoutSeconds": "checkout",
+        "loadGenCodeDescSeconds": "loadGenCodeDesc",
+        "blameSeconds": "blame",
+        "diffSeconds": "diff",
+        "aggregateSeconds": "aggregate",
+        "writeOutputSeconds": "writeOutput",
+    }
+
+    def __init__(self, policy: str) -> None:
+        self.enabled = policy != "off"
+        self.started_at = time.perf_counter()
+        self.durations = {field_name: 0.0 for field_name in self.DURATION_FIELDS if field_name != "totalSeconds"}
+
+    def start(self) -> float:
+        return time.perf_counter()
+
+    def elapsed_since(self, started_at: float) -> float:
+        return max(0.0, time.perf_counter() - started_at)
+
+    @contextlib.contextmanager
+    def measure(self, field_name: str):
+        started_at = self.start()
+        try:
+            yield
+        finally:
+            self.add(field_name, self.elapsed_since(started_at))
+
+    def add(self, field_name: str, seconds: float) -> None:
+        if field_name in self.durations:
+            self.durations[field_name] += max(0.0, seconds)
+
+    def record_algorithm_collection(self, algorithm: str, seconds: float) -> None:
+        self.add("loadGenCodeDescSeconds", seconds)
+        if algorithm == "A":
+            self.add("blameSeconds", seconds)
+        elif algorithm == "B":
+            self.add("diffSeconds", seconds)
+
+    def summary(self) -> dict[str, object]:
+        total_seconds = self.elapsed_since(self.started_at)
+        if self.durations:
+            total_seconds = max(total_seconds, max(self.durations.values()))
+        summary: dict[str, object] = {"totalSeconds": total_seconds, **self.durations}
+        summary["notRun"] = [
+            stage_label for field_name, stage_label in self.STAGE_LABELS.items() if self.durations[field_name] == 0.0
+        ]
+        return summary
 
 
 if __name__ == "__main__":
